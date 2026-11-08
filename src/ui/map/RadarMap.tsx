@@ -117,6 +117,15 @@ export function RadarMap({
           source: 'track-outline',
           paint: { 'line-color': '#7dd3fc', 'line-width': 2.5 },
         })
+
+        // Frame the circuit nicely instead of a fixed zoom level.
+        const bounds = new maplibregl.LngLatBounds()
+        for (const [x, y] of outline.geometry.coordinates) bounds.extend([x, y])
+        map.fitBounds(bounds, {
+          padding: { top: 90, bottom: 40, left: 40, right: 40 },
+          maxZoom: 14,
+          duration: 0,
+        })
       }
 
       if (pins.length > 0) {
@@ -328,9 +337,6 @@ export function RadarMap({
               onChange={(e) => setOpacity(Number(e.target.value))}
               aria-label="Radar opacity"
             />
-          </div>
-          <div className="muted" style={{ fontSize: 11 }}>
-            past 2 h · 10-min steps · forecast lives in the session cards
           </div>
         </div>
       )}
