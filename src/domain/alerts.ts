@@ -7,6 +7,9 @@ export interface RainAlert {
   detail: string
 }
 
+/** Weather voice vs pit-wall voice (strategy lens). */
+export type AlertPhrasing = 'weather' | 'strategy'
+
 /** Alert look-ahead for the high-resolution forecast, ms. */
 export const ALERT_WINDOW_MS = 60 * 60_000
 /** Minimum accumulation inside the alert window to raise an alert, mm. */
@@ -21,7 +24,9 @@ export function forecastRainAlert(
   nowMs: number,
   minutely15: MinutePoint[] | null,
   hourly: HourlyPoint[],
+  phrasing: AlertPhrasing = 'weather',
 ): RainAlert | null {
+  const strategy = phrasing === 'strategy'
   const windowEnd = nowMs + ALERT_WINDOW_MS
 
   if (minutely15 && minutely15.length > 0) {
@@ -31,8 +36,14 @@ export function forecastRainAlert(
       const minutes = first ? Math.max(1, Math.round((first.timeUtc - nowMs) / 60_000)) : null
       return {
         kind: 'forecast',
-        title: minutes !== null ? `Rain expected in ~${minutes} min` : 'Rain expected within the hour',
-        detail: `About ${mm.toFixed(1)} mm of rain forecast in the next 60 minutes.`,
+        title: strategy
+          ? minutes !== null
+            ? `Rain in ~${minutes} min — cars on slicks will need to box`
+            : 'Rain within the hour — cars on slicks will need to box'
+          : minutes !== null
+            ? `Rain expected in ~${minutes} min`
+            : 'Rain expected within the hour',
+        detail: `About ${mm.toFixed(1)} mm of rain forecast in the next 60 minutes${strategy ? ' — expect a tyre change' : ''}.`,
       }
     }
     return null
@@ -48,7 +59,7 @@ export function forecastRainAlert(
   if (mm >= ALERT_MM) {
     return {
       kind: 'forecast',
-      title: 'Rain expected within ~2 h',
+      title: strategy ? 'Rain within ~2 h — plan for a tyre change' : 'Rain expected within ~2 h',
       detail: `About ${mm.toFixed(1)} mm of rain forecast in the next 2 hours (hourly model).`,
     }
   }

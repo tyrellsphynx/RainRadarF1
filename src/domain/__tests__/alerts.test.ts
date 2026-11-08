@@ -34,6 +34,12 @@ describe('forecastRainAlert (minutely)', () => {
     )
     expect(alert).toBeNull()
   })
+
+  it('speaks pit-wall language with strategy phrasing', () => {
+    const alert = forecastRainAlert(NOW, [m(0, 0), m(20, 0.5)], [], 'strategy')
+    expect(alert?.title).toBe('Rain in ~20 min — cars on slicks will need to box')
+    expect(alert?.detail).toContain('tyre change')
+  })
 })
 
 describe('forecastRainAlert (hourly fallback)', () => {

@@ -16,13 +16,19 @@ page.on('response', (res) => {
 })
 
 for (const [name, hash] of [
-  ['track', '#/track/2026-22'],
+  ['track', '#/track/2026-20'],
   ['map', '#/map'],
 ]) {
   console.log(`\n===== ${name} page =====`)
   await page.goto(BASE + '/' + hash, { waitUntil: 'networkidle' }).catch((e) => console.log('[goto]', e.message))
   await page.waitForTimeout(6000)
   if (name === 'track') {
+    await page.locator('.lens-toggle').click()
+    await page.waitForTimeout(500)
+    await page.locator('.session-card').nth(2).locator('.session-head').click()
+    await page.waitForTimeout(800)
+    await page.locator('.session-list').screenshot({ path: '/tmp/rrf1-sessions.png' })
+    console.log('screenshot: /tmp/rrf1-sessions.png')
     await page.locator('.track-map').scrollIntoViewIfNeeded()
     await page.waitForTimeout(1500)
     await page.locator('.track-map').screenshot({ path: '/tmp/rrf1-trackmap.png' })

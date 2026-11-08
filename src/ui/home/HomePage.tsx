@@ -2,9 +2,11 @@ import { useMemo } from 'react'
 import { featuredWeekend, upcomingWeekends } from '../../domain/featured'
 import { formatInTz, tzAt, userTz } from '../../domain/time'
 import { useSchedule } from '../hooks/useSchedule'
+import { useStrategyLens } from '../hooks/useStrategyLens'
 import { useWeekendVerdicts } from '../hooks/useWeekendVerdicts'
 import { useTick } from '../hooks/useTick'
 import { SessionCard } from './SessionCard'
+import { StrategyLensToggle } from '../shell/StrategyLensToggle'
 import { WeekendHero } from '../shell/WeekendHero'
 import { trackHash } from '../shell/useHashRoute'
 
@@ -18,8 +20,9 @@ export default function HomePage() {
   const featured = featuredWeekend(weekends, now)
   const weekend = featured?.weekend ?? null
 
-  const { forecast, verdicts, loading: fcLoading, error: fcError, reload: fcReload } =
+  const { forecast, verdicts, tyres, loading: fcLoading, error: fcError, reload: fcReload } =
     useWeekendVerdicts(weekend)
+  const [lensOn] = useStrategyLens()
 
   const upcoming = useMemo(
     () => upcomingWeekends(weekends, now).filter((w) => w !== weekend),
@@ -57,7 +60,10 @@ export default function HomePage() {
         totalRounds={totalRounds}
       />
 
-      <h2 className="section-title">Session-by-session forecast</h2>
+      <div className="section-title-row">
+        <h2 className="section-title">Session-by-session forecast</h2>
+        <StrategyLensToggle />
+      </div>
       {fcError && (
         <p className="muted">
           Forecast unavailable ({fcError}).{' '}
@@ -81,6 +87,8 @@ export default function HomePage() {
             trackTz={trackTz}
             verdict={verdicts?.[i] ?? null}
             hourly={forecast?.hourly ?? null}
+            tyre={tyres?.[i] ?? null}
+            strategyLens={lensOn}
             live={liveSession !== null && session.startUtc === liveSession.startUtc}
           />
         ))}

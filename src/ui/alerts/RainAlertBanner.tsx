@@ -9,6 +9,7 @@ import {
 } from '../../data/rainviewer/client'
 import { radarCoverageNear, tileAt } from '../../data/rainviewer/proximity'
 import { useSchedule } from '../hooks/useSchedule'
+import { useStrategyLens } from '../hooks/useStrategyLens'
 import { useTick } from '../hooks/useTick'
 
 const POLL_MS = 5 * 60_000
@@ -22,6 +23,7 @@ const RADAR_RADIUS_KM = 25
 export function RainAlertBanner() {
   const { weekends } = useSchedule()
   const now = useTick(60_000)
+  const [lensOn] = useStrategyLens()
   const featured = featuredWeekend(weekends, now)
   const circuit = featured?.weekend.circuit ?? null
   const [rainAlert, setRainAlert] = useState<RainAlert | null>(null)
@@ -39,7 +41,12 @@ export function RainAlertBanner() {
           { lat: circuit.lat, lon: circuit.lon },
           { force: true },
         )
-        let result = forecastRainAlert(Date.now(), forecast.minutely15, forecast.hourly)
+        let result = forecastRainAlert(
+          Date.now(),
+          forecast.minutely15,
+          forecast.hourly,
+          lensOn ? 'strategy' : 'weather',
+        )
 
         if (result === null) {
           // Radar probe is best-effort evidence — never let it break the alert.
@@ -69,7 +76,7 @@ export function RainAlertBanner() {
       alive = false
       window.clearInterval(id)
     }
-  }, [circuit])
+  }, [circuit, lensOn])
 
   const key = circuitId !== null ? `${circuitId}:${new Date().toDateString()}` : ''
   if (rainAlert === null || dismissedKey === key) return null

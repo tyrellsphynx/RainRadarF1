@@ -347,6 +347,130 @@ main {
   border-top: 1px solid var(--border);
 }
 
+/* ---------- strategy lens (tyre-call mode) ---------- */
+
+.section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 26px 0 12px;
+}
+
+.section-title-row .section-title {
+  margin: 0;
+}
+
+.lens-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.lens-toggle .lens-knob {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--unknown);
+  transition: background 0.15s ease;
+}
+
+.lens-toggle.on {
+  color: var(--accent);
+  border-color: rgba(56, 189, 248, 0.5);
+  background: var(--accent-soft);
+}
+
+.lens-toggle.on .lens-knob {
+  background: var(--accent);
+}
+
+.session-verdict-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.compound-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #0b1220;
+  white-space: nowrap;
+}
+
+.compound-chip .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.75;
+}
+
+.compound-chip.slicks {
+  background: var(--dry);
+}
+
+.compound-chip.inters {
+  background: var(--isolated);
+}
+
+.compound-chip.wets {
+  background: #3b82f6;
+}
+
+.compound-chip.unknown {
+  background: var(--unknown);
+}
+
+.tyre-confidence {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.session-tyre-flags {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 16px 12px;
+}
+
+.tyre-flag {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tyre-flag::before {
+  content: '⚑ ';
+  opacity: 0.8;
+}
+
+.tyre-flag.high {
+  color: #fbbf24;
+}
+
+.tyre-caption {
+  color: var(--accent);
+  opacity: 0.85;
+}
+
 /* ---------- charts ---------- */
 
 .precip-chart {
@@ -354,11 +478,84 @@ main {
   overflow-x: auto;
 }
 
-.precip-chart svg {
-  display: block;
-  width: 100%;
+.precip-plot {
+  position: relative;
+  height: 150px;
   min-width: 320px;
-  height: 130px;
+}
+
+.precip-band {
+  position: absolute;
+  top: 14px;
+  bottom: 20px;
+  background: rgba(56, 189, 248, 0.10);
+  border-left: 1px dashed #38bdf8;
+  border-right: 1px dashed #38bdf8;
+}
+
+.precip-seg {
+  position: absolute;
+  top: 14px;
+  bottom: 20px;
+  opacity: 0.16;
+}
+
+.precip-crossover {
+  position: absolute;
+  top: 14px;
+  bottom: 20px;
+  border-left: 1px dashed rgba(199, 213, 234, 0.7);
+}
+
+.precip-crossover-label {
+  position: absolute;
+  top: 1px;
+  left: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.precip-bars {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+
+.precip-slot {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.precip-prob {
+  height: 14px;
+  font-size: 9px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.precip-bar-wrap {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.precip-bar {
+  width: min(30px, 60%);
+  border-radius: 3px 3px 0 0;
+}
+
+.precip-time {
+  height: 20px;
+  padding-top: 3px;
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .chart-caption {
@@ -607,7 +804,7 @@ main {
     grid-area: times;
   }
 
-  .session-head .badge {
+  .session-head .session-verdict-cell {
     grid-area: badge;
     justify-self: end;
   }
