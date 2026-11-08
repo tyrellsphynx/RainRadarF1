@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import type { Feature } from 'geojson'
+import type { Feature, FeatureCollection, Point } from 'geojson'
 import { DARK_STYLE, OPENFREEMAP_ATTRIBUTION } from '../../data/map/darkStyle'
 import {
   loadRadarFrames,
@@ -35,6 +35,17 @@ interface RadarMapProps {
 const FADE_MS = 240
 const FRAME_INTERVAL_MS = 700
 const RADAR_OPACITY = 0.85
+
+function pinsToGeoJSON(pins: PinSpec[]): FeatureCollection<Point> {
+  return {
+    type: 'FeatureCollection',
+    features: pins.map((p) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
+      properties: { id: p.id, title: p.title, color: p.color },
+    })),
+  }
+}
 
 /**
  * MapLibre map with the animated RainViewer radar layer (past 2 h),
@@ -111,14 +122,7 @@ export function RadarMap({
       if (pins.length > 0) {
         map.addSource('pins', {
           type: 'geojson',
-          data: {
-            type: 'FeatureCollection',
-            features: pins.map((p) => ({
-              type: 'Feature',
-              geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
-              properties: { id: p.id, title: p.title, color: p.color },
-            })),
-          },
+          data: pinsToGeoJSON(pins),
         })
         map.addLayer({
           id: 'pins-circle',
@@ -175,6 +179,14 @@ export function RadarMap({
     // init once; pins/outline are static per page instance
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // ---- keep pin colors in sync (status data arrives after mount) ----
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapReady) return
+    const source = map.getSource('pins') as maplibregl.GeoJSONSource | undefined
+    if (source && pins.length > 0) source.setData(pinsToGeoJSON(pins))
+  }, [mapReady, pins])
 
   // ---- radar frame list ----
   useEffect(() => {
@@ -237,7 +249,8 @@ export function RadarMap({
 
       const start = performance.now()
       const tick = (t: number) => {
-        const k = Math.min(1, (t - start) / FADE_MS)
+        // rAF timestamps can predate `start` — clamp into [0, 1]
+        const k = Math.max(0, Math.min(1, (t - start) / FADE_MS))
         map.setPaintProperty(backId, 'raster-opacity', k * opacity)
         map.setPaintProperty(frontId, 'raster-opacity', (1 - k) * opacity)
         if (k < 1) {

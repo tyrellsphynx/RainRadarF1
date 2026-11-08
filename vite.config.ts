@@ -1,13 +1,42 @@
-import { defineConfig } from 'vite'
+import fs from 'node:fs'
+import path from 'node:path'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+
+/**
+ * maplibre-gl loads its tile-parsing worker via
+ * `new URL('./maplibre-gl-worker.mjs', import.meta.url)`. Bundlers don't
+ * follow that reference, so the worker file must be placed next to the
+ * emitted chunks (build) and served from the raw package (dev — see
+ * optimizeDeps.exclude). Without this, no tiles render at all.
+ */
+function maplibreWorkerFix(): Plugin {
+  const workerFile = path.resolve('node_modules/maplibre-gl/dist/maplibre-gl-worker.mjs')
+  return {
+    name: 'maplibre-worker-fix',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'assets/maplibre-gl-worker.mjs',
+        source: fs.readFileSync(workerFile),
+      })
+    },
+  }
+}
 
 // Relative base so the app works from any sub-path (GitHub Pages project sites)
 // and any custom domain without rebuilds.
 export default defineConfig({
   base: './',
+  optimizeDeps: {
+    // Serve maplibre-gl raw in dev so import.meta.url points into
+    // /node_modules/maplibre-gl/dist/ where the worker file lives.
+    exclude: ['maplibre-gl'],
+  },
   plugins: [
     react(),
+    maplibreWorkerFix(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
@@ -27,7 +56,7 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        globPatterns: ['**/*.{js,mjs,css,html,svg,png,woff2}'],
         runtimeCaching: [
           {
             // Radar tiles: immutable per frame path — cache-first is safe.
