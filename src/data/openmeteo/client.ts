@@ -43,7 +43,7 @@ export async function loadForecast(
     hourly: HOURLY_VARS,
     minutely_15: 'precipitation',
     timezone: 'UTC',
-    past_days: '1',
+    past_days: '2',
     forecast_days: '16',
   })
   const res = await fetchFn(`${API_BASE}?${params}`)

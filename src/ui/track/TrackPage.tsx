@@ -98,14 +98,13 @@ export default function TrackPage({ season, round }: TrackPageProps) {
       </div>
 
       <h2 className="section-title">Rain radar — past 2 hours</h2>
-      <div className="track-map">
-        <RadarMap
-          lat={weekend.circuit.lat}
-          lon={weekend.circuit.lon}
-          zoom={11}
-          outlineCircuitId={weekend.circuit.circuitId}
-        />
-      </div>
+      <RadarMap
+        className="track-map"
+        lat={weekend.circuit.lat}
+        lon={weekend.circuit.lon}
+        zoom={11}
+        outlineCircuitId={weekend.circuit.circuitId}
+      />
       <p className="chart-caption">
         Global radar composites resolve to roughly 1 km per pixel — great for rain bands, soft on
         detail right over the circuit. The forecast cards above are the verdict; the radar is the
