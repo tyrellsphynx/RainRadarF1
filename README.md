@@ -15,6 +15,9 @@ aligned to FP1/FP2/FP3/Sprint/Qualifying/Race times.
   (past 2 h, 10-min steps) with the track outline drawn over it.
 - **In-app rain alerts** — "Rain expected in ~20 min" banner for the featured circuit (forecast +
   radar-within-25-km probe). No push notifications, no accounts — by design.
+- **Strategy lens (tyre-call mode)** — optional overlay translating the forecast into
+  `Slicks / Inters / Wets` calls with confidence splits (never a flat call), compound color
+  bands with crossover minutes in the charts, and safety-car / 2-hour-limit flags on race days.
 - **PWA** — installable, works offline (cached shell, tiles and last-known data).
 - Times shown in **your timezone** first, track-local second, with countdowns everywhere.
 
