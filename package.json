@@ -12,7 +12,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "node e2e/smoke.mjs",
+    "test:e2e": "node e2e/smoke.mjs && node e2e/radar-resilience.mjs",
     "snapshot": "node scripts/fetch-snapshot.mjs"
   },
   "dependencies": {
