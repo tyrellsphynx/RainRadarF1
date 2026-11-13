@@ -79,9 +79,21 @@ export default defineConfig({
             },
           },
           {
+            // Radar frame lists go stale fast (tile paths are ephemeral):
+            // cap their cache age well below the generic API rule below.
+            urlPattern: /^https:\/\/api\.rainviewer\.com\/.*/i,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'rainviewer-api',
+              networkTimeoutSeconds: 10,
+              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
             // JSON APIs: network-first with a short timeout, then localStorage
             // caching at the data layer as the deeper fallback.
-            urlPattern: /^https:\/\/(api\.jolpi\.ca|api\.open-meteo\.com|api\.rainviewer\.com)\/.*/i,
+            urlPattern: /^https:\/\/(api\.jolpi\.ca|api\.open-meteo\.com)\/.*/i,
             handler: 'NetworkFirst',
             options: {
               cacheName: 'weather-apis',

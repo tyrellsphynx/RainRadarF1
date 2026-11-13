@@ -48,15 +48,31 @@ export async function loadRadarFrames(opts: LoadFramesOptions = {}): Promise<Rad
     host: string
     radar?: { past?: Array<{ time: number; path: string }> }
   }
-  const past = (json.radar?.past ?? []).map((f) => ({
-    timeUtc: f.time * 1000,
-    path: f.path,
-  }))
-  if (past.length === 0) throw new Error('RainViewer returned no radar frames')
+  const past = filterFreshFrames(
+    (json.radar?.past ?? []).map((f) => ({
+      timeUtc: f.time * 1000,
+      path: f.path,
+    })),
+    nowMs,
+  )
+  if (past.length === 0) throw new Error('RainViewer returned no fresh radar frames')
 
   const frames: RadarFrames = { host: json.host, past, fetchedAt: nowMs }
   cache.set('rrf1:radar-frames', frames)
   return frames
+}
+
+/** Frames older than this are dropped: their tiles may no longer be served. */
+export const MAX_FRAME_AGE_MS = 3 * 60 * 60 * 1000
+
+/**
+ * Keep only frames a viewer could plausibly still see: a stale frame list
+ * (cached weather-maps.json) references tile paths that can die server-side,
+ * which renders as a blank radar. The live window is 2 h; 3 h is slack.
+ */
+export function filterFreshFrames(frames: RadarFrame[], nowMs: number): RadarFrame[] {
+  const cutoff = nowMs - MAX_FRAME_AGE_MS
+  return frames.filter((f) => f.timeUtc >= cutoff)
 }
 
 /** Raster tile URL template (`{z}/{x}/{y}`) for one radar frame — MapLibre/Leaflet style. */
