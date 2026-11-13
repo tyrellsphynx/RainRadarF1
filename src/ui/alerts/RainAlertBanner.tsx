@@ -14,6 +14,10 @@ import { useTick } from '../hooks/useTick'
 
 const POLL_MS = 5 * 60_000
 const RADAR_RADIUS_KM = 25
+/** Alerts older than this are hidden (the poller keeps them fresh while active). */
+const ALERT_FRESH_MS = 3 * POLL_MS
+/** Only poll for rain alerts when a session starts within this horizon. */
+const ALERT_POLL_HORIZON_MS = 48 * 3_600_000
 
 /**
  * In-app rain alert for the featured circuit: forecast trigger
@@ -26,13 +30,20 @@ export function RainAlertBanner() {
   const [lensOn] = useStrategyLens()
   const featured = featuredWeekend(weekends, now)
   const circuit = featured?.weekend.circuit ?? null
-  const [rainAlert, setRainAlert] = useState<RainAlert | null>(null)
+  const [rainAlert, setRainAlert] = useState<{ alert: RainAlert; issuedAt: number } | null>(null)
   const [dismissedKey, setDismissedKey] = useState<string | null>(null)
 
   const circuitId = circuit?.circuitId ?? null
 
+  // Poll only near a session (live, or starting within the horizon) — quiet
+  // and API-friendly between race weekends.
+  const nextSession = featured?.session ?? null
+  const nearSession =
+    nextSession !== null &&
+    (nextSession.startUtc <= now || nextSession.startUtc - now <= ALERT_POLL_HORIZON_MS)
+
   useEffect(() => {
-    if (circuit === null) return
+    if (circuit === null || !nearSession) return
     let alive = true
 
     const check = async () => {
@@ -64,7 +75,7 @@ export function RainAlertBanner() {
           }
         }
 
-        if (alive) setRainAlert(result)
+        if (alive) setRainAlert(result ? { alert: result, issuedAt: Date.now() } : null)
       } catch {
         if (alive) setRainAlert(null)
       }
@@ -76,10 +87,11 @@ export function RainAlertBanner() {
       alive = false
       window.clearInterval(id)
     }
-  }, [circuit, lensOn])
+  }, [circuit, lensOn, nearSession])
 
-  const key = circuitId !== null ? `${circuitId}:${new Date().toDateString()}` : ''
-  if (rainAlert === null || dismissedKey === key) return null
+  const key = circuitId !== null ? `${circuitId}:${new Date(now).toDateString()}` : ''
+  const stale = rainAlert !== null && now - rainAlert.issuedAt > ALERT_FRESH_MS
+  if (rainAlert === null || stale || !nearSession || dismissedKey === key) return null
 
   return (
     <div className="alert-banner" role="status">
@@ -87,10 +99,10 @@ export function RainAlertBanner() {
         🌧️
       </span>
       <div>
-        <div className="alert-title">{rainAlert.title}</div>
+        <div className="alert-title">{rainAlert.alert.title}</div>
         <div className="alert-detail">
           {circuit ? `${circuit.locality}: ` : ''}
-          {rainAlert.detail}
+          {rainAlert.alert.detail}
         </div>
       </div>
       <button
