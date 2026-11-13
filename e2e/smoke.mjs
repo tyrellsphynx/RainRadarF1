@@ -66,7 +66,10 @@ async function main() {
     try {
       await waitForServer(BASE)
     } catch (err) {
-      throw new Error(`${err.message}\n--- vite preview output ---\n${serverLog || '(no output)'}`)
+      throw new Error(
+        `${err.message}\n--- vite preview output ---\n${serverLog || '(no output)'}`,
+        { cause: err },
+      )
     }
     pass(`preview server up at ${BASE}`)
   }
