@@ -1,5 +1,6 @@
 import { Suspense, lazy } from 'react'
 import { Attribution } from './ui/shell/Attribution'
+import { ErrorBoundary } from './ui/shell/ErrorBoundary'
 import { RainAlertBanner } from './ui/alerts/RainAlertBanner'
 import { navigate, useHashRoute } from './ui/shell/useHashRoute'
 
@@ -40,15 +41,17 @@ export default function App() {
       </header>
 
       <main>
-        <Suspense fallback={<PageLoader />}>
-          {route.name === 'map' && <MapPage />}
-          {route.name === 'track' &&
-            route.season !== undefined &&
-            route.round !== undefined && (
-              <TrackPage key={`${route.season}-${route.round}`} season={route.season} round={route.round} />
-            )}
-          {route.name === 'home' && <HomePage />}
-        </Suspense>
+        <ErrorBoundary>
+          <Suspense fallback={<PageLoader />}>
+            {route.name === 'map' && <MapPage />}
+            {route.name === 'track' &&
+              route.season !== undefined &&
+              route.round !== undefined && (
+                <TrackPage key={`${route.season}-${route.round}`} season={route.season} round={route.round} />
+              )}
+            {route.name === 'home' && <HomePage />}
+          </Suspense>
+        </ErrorBoundary>
       </main>
 
       <RainAlertBanner />
