@@ -83,6 +83,7 @@ export default function MapPage() {
           lat: c.lat,
           color: VERDICT_META[verdict].color,
           title: c.title,
+          status: VERDICT_META[verdict].label,
         }
       }),
     [circuits, batch, now],
@@ -125,6 +126,22 @@ export default function MapPage() {
         ))}
         {batchError && <div className="muted">status unavailable: {batchError}</div>}
       </div>
+
+      {/* Keyboard/screen-reader-accessible twin of the map pins. */}
+      <details className="circuit-list">
+        <summary>All circuits</summary>
+        <ul>
+          {pins.map((p) => (
+            <li key={p.id}>
+              <a href={`#/track/${p.id}`}>
+                <span className="swatch" style={{ background: p.color }} aria-hidden="true" />
+                {p.title}
+                {p.status !== undefined && <span className="sr-only"> — {p.status}</span>}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </details>
     </div>
   )
 }

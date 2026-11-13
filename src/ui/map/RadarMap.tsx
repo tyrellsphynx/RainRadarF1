@@ -17,6 +17,8 @@ export interface PinSpec {
   lat: number
   color: string
   title: string
+  /** Verdict label for screen readers (keyboard-accessible list). */
+  status?: string
 }
 
 interface RadarMapProps {

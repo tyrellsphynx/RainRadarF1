@@ -38,6 +38,11 @@ export function PrecipChart({ hourly, startMs, endMs, tz, timeline = null }: Pre
   const bandLeft = pctOf(startMs)
   const bandRight = pctOf(endMs)
   const maxMm = Math.max(0.4, ...points.map((p) => p.mm))
+  const totalMm = points.reduce((sum, p) => sum + p.mm, 0)
+  const chartLabel =
+    `Precipitation forecast chart: ${points.length} hourly steps, ` +
+    `peak ${maxMm.toFixed(1)} mm per hour, about ${Math.round(totalMm * 10) / 10} mm expected in total. ` +
+    'Rain probability per hour is shown above each bar; the shaded band marks the session window.'
 
   // compound bands (strategy lens) — clipped to the session window
   const segments: Array<{ left: number; width: number; color: string }> = []
@@ -54,7 +59,7 @@ export function PrecipChart({ hourly, startMs, endMs, tz, timeline = null }: Pre
 
   return (
     <div className="precip-chart">
-      <div className="precip-plot">
+      <div className="precip-plot" role="img" aria-label={chartLabel}>
         <div
           className="precip-band"
           style={{ left: `${bandLeft}%`, width: `${Math.max(1, bandRight - bandLeft)}%` }}
