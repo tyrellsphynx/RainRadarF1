@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { RaceWeekend } from '../../domain/types'
-import { loadRelevantSeasons } from '../../data/jolpica/client'
+import { loadRelevantSeasons, SCHEDULE_TTL_MS } from '../../data/jolpica/client'
 
 /** Module-level in-flight cache: several pages need the same schedule. */
 let inflight: Promise<RaceWeekend[]> | null = null
+/** When the current inflight schedule was fetched (0 = never). */
+let fetchedAt = 0
 
 function loadAll(): Promise<RaceWeekend[]> {
   if (inflight === null) {
     inflight = loadRelevantSeasons()
-      .then((weekends) => [...weekends].sort((a, b) => a.raceStartUtc - b.raceStartUtc))
+      .then((weekends) => {
+        fetchedAt = Date.now()
+        return [...weekends].sort((a, b) => a.raceStartUtc - b.raceStartUtc)
+      })
       .catch((err: unknown) => {
         inflight = null
         throw err
@@ -38,6 +43,16 @@ export function useSchedule(): ScheduleState {
         setWeekends(w)
         setError(null)
         setLoading(false)
+        if (Date.now() - fetchedAt >= SCHEDULE_TTL_MS) {
+          // Stale-while-revalidate: render the cached schedule, then refresh
+          // it behind the scenes so long-lived sessions pick up changes.
+          inflight = null
+          loadAll()
+            .then((fresh) => {
+              if (alive) setWeekends(fresh)
+            })
+            .catch(() => {})
+        }
       })
       .catch((err: unknown) => {
         if (!alive) return
