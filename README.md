@@ -14,7 +14,9 @@ aligned to FP1/FP2/FP3/Sprint/Qualifying/Race times.
 - **Track dashboards** — per-circuit page with the full weekend forecast and the animated radar
   (past 2 h, 10-min steps) with the track outline drawn over it.
 - **In-app rain alerts** — "Rain expected in ~20 min" banner for the featured circuit (forecast +
-  radar-within-25-km probe). No push notifications, no accounts — by design.
+  radar-within-25-km probe). Polled only near sessions (live or starting within 48 h), so the app
+  stays quiet and API-friendly between race weekends. No push notifications, no accounts — by
+  design.
 - **Strategy lens (tyre-call mode)** — optional overlay translating the forecast into
   `Slicks / Inters / Wets` calls with confidence splits (never a flat call), compound color
   bands with crossover minutes in the charts, and safety-car / 2-hour-limit flags on race days.
@@ -46,6 +48,7 @@ npm test           # vitest (domain logic: verdicts, aggregation, timezones/DST,
 npm run typecheck  # tsc -b
 npm run lint       # eslint
 npm run build      # production build into dist/
+npm run test:e2e   # Playwright smoke test against the production build
 npm run snapshot   # refresh bundled schedule snapshot + track outlines
 python3 scripts/gen_icons.py   # regenerate PWA icons
 ```
