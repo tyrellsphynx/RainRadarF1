@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { RADAR_TILE_SIZE } from '../rainviewer/client'
 import { kmPerPx, tileAt } from '../rainviewer/proximity'
 
 describe('tileAt', () => {
@@ -21,9 +22,9 @@ describe('tileAt', () => {
     expect(t.x).toBe(66)
     expect(t.y).toBe(43)
     expect(t.px).toBeGreaterThanOrEqual(0)
-    expect(t.px).toBeLessThan(256)
+    expect(t.px).toBeLessThan(RADAR_TILE_SIZE)
     expect(t.py).toBeGreaterThanOrEqual(0)
-    expect(t.py).toBeLessThan(256)
+    expect(t.py).toBeLessThan(RADAR_TILE_SIZE)
   })
 
   it('clamps coordinates at the antimeridian into the grid', () => {
@@ -33,7 +34,7 @@ describe('tileAt', () => {
 
 describe('kmPerPx', () => {
   it('is about 1 km/px near the equator at z7', () => {
-    expect(kmPerPx(0, 7)).toBeCloseTo(111.32 / ((128 * 256) / 360), 5)
+    expect(kmPerPx(0, 7)).toBeCloseTo(111.32 / ((128 * RADAR_TILE_SIZE) / 360), 5)
   })
 
   it('shrinks with latitude and zoom', () => {

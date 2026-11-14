@@ -1,4 +1,5 @@
 import { RADAR_MAX_ZOOM, RADAR_TILE_SIZE } from './client'
+import { radarTiles } from './tiles'
 
 export interface TileCoord {
   z: number
@@ -46,7 +47,7 @@ export async function radarCoverageNear(
 ): Promise<number> {
   try {
     const tile = tileAt(lat, lon, RADAR_MAX_ZOOM)
-    const image = await loadImage(tileUrl)
+    const image = await createImageBitmap(new Blob([await radarTiles.fetch(tileUrl, { priority: true })]))
     const canvas = document.createElement('canvas')
     canvas.width = RADAR_TILE_SIZE
     canvas.height = RADAR_TILE_SIZE
@@ -78,16 +79,6 @@ export async function radarCoverageNear(
   } catch {
     return 0 // tile fetch failed — no evidence of rain, no alert
   }
-}
-
-function loadImage(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = () => resolve(img)
-    img.onerror = () => reject(new Error(`Failed to load radar tile: ${url}`))
-    img.src = url
-  })
 }
 
 function clampTile(v: number, n: number): number {

@@ -21,7 +21,8 @@ export function memoryStore(): KeyValueStore {
   }
 }
 
-function defaultStore(): KeyValueStore {
+/** localStorage when usable, else an in-memory store. */
+export function defaultStore(): KeyValueStore {
   try {
     const store = window.localStorage
     const probe = '__rrf1_probe__'

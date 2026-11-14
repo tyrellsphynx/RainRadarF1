@@ -110,6 +110,7 @@ export default function MapPage() {
         zoom={1.5}
         pins={pins}
         fitBoundsToPins
+        autoPlay={false}
         onPinClick={(id) => {
           const [season, round] = id.split('-').map(Number)
           if (season !== undefined && round !== undefined && Number.isFinite(season) && Number.isFinite(round)) {
@@ -126,6 +127,7 @@ export default function MapPage() {
             {VERDICT_META[v].label}
           </div>
         ))}
+        <div className="muted">Press ▶ to animate the last 2 h — frames load gradually.</div>
         {batchError && <div className="muted">status unavailable: {batchError}</div>}
       </div>
 

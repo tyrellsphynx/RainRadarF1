@@ -97,6 +97,9 @@ async function main() {
   const brokenPath = frames[2]
   pass(`breaking tiles for frame ${brokenHash}`)
 
+  // the world map no longer autoplays (tile budget) — start playback
+  await page.click('button[aria-label="Play radar"]')
+
   // let autoplay run through more than one full loop (13 frames x 700 ms + fade)
   const seenVisible = new Set()
   const deadline = Date.now() + 16_000

@@ -98,6 +98,9 @@ async function main() {
   await page.goto(`${BASE}/#/map`, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('[data-visible-frame]', { timeout: 60_000 })
 
+  // the world map no longer autoplays (tile budget) — start playback
+  await page.click('button[aria-label="Play radar"]')
+
   // let playback run through the whole outage (3 loops of ~9 s)
   await page.waitForTimeout(OUTAGE_MS + 2_000)
 

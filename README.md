@@ -20,7 +20,7 @@ aligned to FP1/FP2/FP3/Sprint/Qualifying/Race times.
 - **Strategy lens (tyre-call mode)** — optional overlay translating the forecast into
   `Slicks / Inters / Wets` calls with confidence splits (never a flat call), compound color
   bands with crossover minutes in the charts, and safety-car / 2-hour-limit flags on race days.
-- **PWA** — installable, works offline (cached shell, tiles and last-known data).
+- **PWA** — installable, works offline (cached shell, basemap tiles and last-known data).
 - Times shown in **your timezone** first, track-local second, with countdowns everywhere.
 
 ## Stack
@@ -35,7 +35,7 @@ aligned to FP1/FP2/FP3/Sprint/Qualifying/Race times.
 | Track outlines | bacinger/f1-circuits (MIT) | bundled at build time |
 
 All API calls are browser-side (CORS-open sources). Everything is cached: schedule 24 h,
-forecasts 1 h, radar frame lists 5 min, tiles via service worker — with a committed snapshot
+forecasts 1 h, radar frame lists 5 min, basemap tiles via service worker — with a committed snapshot
 (`src/data/jolpica/snapshot-*.json`) as the offline fallback. The season rolls over automatically:
 data is fetched per year.
 
@@ -76,6 +76,12 @@ forecast horizon → **Too early to call**.
 
 ## Known limitations (by design, v1)
 
+- RainViewer limits tile requests to ~100 per IP per minute (over the limit it answers 429 without
+  CORS headers, which browsers show as `net::ERR_FAILED`). Every radar tile therefore goes through a
+  client-side budget (`src/data/rainviewer/tileScheduler.ts`: 80 requests/min, shared across reloads
+  and tabs, bounded concurrency, cool-down after failure streaks), uses 512 px tiles (about a quarter
+  of the requests) and playback advances only once a frame has fully loaded. The track page
+  animates right away; the world map starts paused and loads frames gradually when you press ▶.
 - RainViewer's free tiles top out at zoom 7 (≈1 km/px) — radar is soft right over a circuit. The
   forecast cards are the verdict; the radar is supporting evidence. (v2: DWD 1-km tiles for EU races.)
 - RainViewer no longer provides nowcast frames (discontinued 2026-01); the "next hour" story comes

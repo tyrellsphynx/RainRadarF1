@@ -6,8 +6,14 @@ import { JsonCache, isFresh } from '../cache'
  * discontinued) — the "next hour" story lives in the Open-Meteo layer.
  */
 export const FRAMES_TTL_MS = 5 * 60 * 1000
-export const RADAR_TILE_SIZE = 256
-/** RainViewer serves radar tiles up to zoom 7 (≈1 km/px). */
+/**
+ * 512 px tiles: a 512 px tile at zoom z covers the same area as the 256 px tile
+ * at z, and MapLibre asks for one zoom level lower with `tileSize: 512` — about
+ * a quarter of the requests for the same view. That matters under RainViewer's
+ * 100 requests/minute limit.
+ */
+export const RADAR_TILE_SIZE = 512
+/** RainViewer serves radar tiles up to zoom 7. */
 export const RADAR_MAX_ZOOM = 7
 const MAPS_URL = 'https://api.rainviewer.com/public/weather-maps.json'
 /** Color scheme 2 = Universal Blue (the only scheme left); options 1_1 = smooth + snow. */
@@ -75,9 +81,28 @@ export function filterFreshFrames(frames: RadarFrame[], nowMs: number): RadarFra
   return frames.filter((f) => f.timeUtc >= cutoff)
 }
 
-/** Raster tile URL template (`{z}/{x}/{y}`) for one radar frame — MapLibre/Leaflet style. */
+/**
+ * Custom URL scheme MapLibre loads radar tiles through, so every tile request
+ * passes the rate-limit budget (see tileScheduler.ts) instead of hitting the
+ * network directly.
+ */
+export const RADAR_PROTOCOL = 'rvtile'
+
+/** `https://host/path` → `rvtile://host/path` */
+export function toRadarProtocolUrl(httpsUrl: string): string {
+  return httpsUrl.replace(/^https:/, `${RADAR_PROTOCOL}:`)
+}
+
+/** `rvtile://host/path` → `https://host/path` */
+export function fromRadarProtocolUrl(url: string): string {
+  return url.replace(new RegExp(`^${RADAR_PROTOCOL}:`), 'https:')
+}
+
+/** MapLibre raster tile URL template (`{z}/{x}/{y}`) for one radar frame, in the budgeted scheme. */
 export function radarTileTemplate(frames: RadarFrames, frame: RadarFrame): string {
-  return `${frames.host}${frame.path}/${RADAR_TILE_SIZE}/{z}/{x}/{y}/${TILE_STYLE}.png`
+  return toRadarProtocolUrl(
+    `${frames.host}${frame.path}/${RADAR_TILE_SIZE}/{z}/{x}/{y}/${TILE_STYLE}.png`,
+  )
 }
 
 /** Concrete raster tile URL for one radar frame at a slippy-map tile coordinate. */

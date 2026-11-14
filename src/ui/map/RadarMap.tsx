@@ -5,13 +5,16 @@ import type { Feature, FeatureCollection, Point } from 'geojson'
 import { DARK_STYLE, OPENFREEMAP_ATTRIBUTION } from '../../data/map/darkStyle'
 import {
   RADAR_MAX_ZOOM,
+  RADAR_TILE_SIZE,
   radarTileTemplate,
   radarTileUrl,
 } from '../../data/rainviewer/client'
 import { tileAt } from '../../data/rainviewer/proximity'
+import { radarTiles } from '../../data/rainviewer/tiles'
 import { outlineFor } from '../../data/circuits'
 import { formatInTz, userTz } from '../../domain/time'
 import { isBackedOff, nextBackoff, type FrameBackoff } from './frameBackoff'
+import { ensureRadarProtocol } from './radarProtocol'
 import { useRadarFrames } from './useRadarFrames'
 
 export interface PinSpec {
@@ -34,14 +37,43 @@ interface RadarMapProps {
   onPinClick?: (id: string) => void
   fitBoundsToPins?: boolean
   showRadarControls?: boolean
+  /**
+   * Start animating right away. Off for views that need many tiles per frame
+   * (world map): RainViewer allows ~100 tile requests per minute, so a full
+   * loop must be a deliberate, gradual action there.
+   */
+  autoPlay?: boolean
   className?: string
 }
 
 const FADE_MS = 240
 const FRAME_INTERVAL_MS = 700
 const RADAR_OPACITY = 0.85
-/** How long to wait for a frame's tiles before giving up and keeping the previous frame. */
-const TILE_WAIT_MS = 8000
+/**
+ * How long a frame may take to load completely before we keep the previous
+ * one. Generous: tile requests queue behind RainViewer's rate budget.
+ */
+const TILE_LOAD_WAIT_MS = 30_000
+
+/** Resolves true once all tiles of the source's current view have settled; false on timeout or cancel. */
+function waitForSourceIdle(
+  map: maplibregl.Map,
+  id: string,
+  timeoutMs: number,
+  cancelled: () => boolean,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const deadline = Date.now() + timeoutMs
+    const poll = () => {
+      if (cancelled()) return resolve(false)
+      if (map.isSourceLoaded(id)) return resolve(true)
+      if (Date.now() >= deadline) return resolve(false)
+      window.setTimeout(poll, 100)
+    }
+    // give MapLibre a moment to notice the new tile URLs and start loading
+    window.setTimeout(poll, 150)
+  })
+}
 
 function pinsToGeoJSON(pins: PinSpec[]): FeatureCollection<Point> {
   return {
@@ -67,6 +99,7 @@ export function RadarMap({
   onPinClick,
   fitBoundsToPins = false,
   showRadarControls = true,
+  autoPlay = true,
   className = 'map-container',
 }: RadarMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -84,7 +117,12 @@ export function RadarMap({
   /** Latest opacity / visibility, readable from long-lived callbacks without re-running playback. */
   const opacityRef = useRef(RADAR_OPACITY)
   const radarOnRef = useRef(true)
-  const showFrameRef = useRef<((index: number) => void) | null>(null)
+  /** A frame is being verified / loaded / faded in — playback waits instead of piling up requests. */
+  const busyRef = useRef(false)
+  const probeAbortRef = useRef<AbortController | null>(null)
+  /** Tile errors per radar layer since its tiles were last switched. */
+  const tileErrorsRef = useRef<Record<string, number>>({})
+  const showFrameRef = useRef<((index: number) => Promise<void>) | null>(null)
 
   useEffect(() => {
     pinClickRef.current = onPinClick
@@ -93,7 +131,7 @@ export function RadarMap({
   const [mapReady, setMapReady] = useState(false)
   const frames = useRadarFrames(targetIdxRef)
   const [frameIdx, setFrameIdx] = useState(0)
-  const [playing, setPlaying] = useState(true)
+  const [playing, setPlaying] = useState(autoPlay)
   const [radarOn, setRadarOn] = useState(true)
   const [opacity, setOpacity] = useState(RADAR_OPACITY)
 
@@ -102,6 +140,7 @@ export function RadarMap({
     const container = containerRef.current
     if (container === null) return
 
+    ensureRadarProtocol()
     const map = new maplibregl.Map({
       container,
       style: DARK_STYLE,
@@ -113,6 +152,20 @@ export function RadarMap({
       },
     })
     mapRef.current = map
+
+    // Radar tile failures are expected (throttling, outages) and handled per
+    // frame by the playback logic; don't let MapLibre spam the console.
+    map.on('error', (e) => {
+      const sourceId = (e as { sourceId?: string }).sourceId
+      if (sourceId === 'radar-a' || sourceId === 'radar-b') {
+        if ((e.error as { name?: string } | undefined)?.name !== 'AbortError') {
+          tileErrorsRef.current[sourceId] = (tileErrorsRef.current[sourceId] ?? 0) + 1
+        }
+        return
+      }
+      console.error(e.error)
+    })
+
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
 
     map.on('load', () => {
@@ -239,7 +292,7 @@ export function RadarMap({
         map.addSource(id, {
           type: 'raster',
           tiles: [first ? radarTileTemplate(frames, first) : ''],
-          tileSize: 256,
+          tileSize: RADAR_TILE_SIZE,
           maxzoom: RADAR_MAX_ZOOM,
         })
         map.addLayer(
@@ -257,42 +310,70 @@ export function RadarMap({
       }
     }
 
-    const showFrame = (index: number) => {
+    const showFrame = async (index: number) => {
       const frame = frames.past[Math.min(index, frames.past.length - 1)]
       if (!frame) return
       // Monotonic generation: only the latest requested frame may touch the
       // layers; superseded fades and probes abort silently.
       const gen = ++fadeGenRef.current
+      const stale = () => gen !== fadeGenRef.current
+      probeAbortRef.current?.abort()
       targetIdxRef.current = index
       containerRef.current?.setAttribute('data-requested-frame', frame.path)
 
       // Failed frames back off (dead path, throttled host, flaky network):
       // skip them entirely — no probe, no tile burst — until their retry time.
       if (isBackedOff(frameBackoffRef.current.get(frame.path), Date.now())) {
-        if (gen === fadeGenRef.current) setFrameIdx(visibleIdxRef.current)
+        busyRef.current = false
+        setFrameIdx(visibleIdxRef.current)
         return
       }
 
       const frontId = frontLayerRef.current
       const backId = frontId === 'radar-a' ? 'radar-b' : 'radar-a'
       const backSource = map.getSource(backId) as maplibregl.RasterTileSource | undefined
-      if (!backSource) return
+      if (!backSource) {
+        busyRef.current = false
+        return
+      }
 
-      // Never swap to an unverified layer — that reveals a blank map (the
-      // "radar disappears" bug). Probe one tile of the new frame first; only
-      // swap once tiles demonstrably fetch. On failure the map keeps showing
-      // the last good frame and the frame is retried later with backoff.
-      const verified = () => {
-        if (gen !== fadeGenRef.current) return
-        frameBackoffRef.current.delete(frame.path)
-        setFrameIdx(index)
-        // Snap to "current frame visible, incoming hidden", then crossfade.
+      busyRef.current = true
+      const probe = new AbortController()
+      probeAbortRef.current = probe
+      try {
+        // Never swap to an unverified layer — that reveals a blank map (the
+        // "radar disappears" bug). 1) Probe one tile of the new frame; it
+        // lands in the tile cache, so the layer's own request is free.
+        const center = map.getCenter()
+        const z = Math.min(Math.floor(map.getZoom()), RADAR_MAX_ZOOM)
+        const tile = tileAt(center.lat, center.lng, z)
+        await radarTiles.fetch(radarTileUrl(frames, frame, tile.z, tile.x, tile.y), {
+          signal: probe.signal,
+        })
+        if (stale()) return
+
+        // 2) Load the whole viewport into the hidden layer. Tile requests
+        // queue behind the shared rate budget, so this can take a while.
         map.setPaintProperty(frontId, 'raster-opacity', radarOnRef.current ? opacityRef.current : 0)
         map.setPaintProperty(backId, 'raster-opacity', 0)
+        tileErrorsRef.current[backId] = 0
         backSource.setTiles([radarTileTemplate(frames, frame)])
+        const loaded = await waitForSourceIdle(map, backId, TILE_LOAD_WAIT_MS, stale)
+        if (stale()) return
+        if ((tileErrorsRef.current[backId] ?? 0) > 0) throw new Error('radar tiles failed to load')
+        if (!loaded) {
+          // Still queued behind the budget: not a failure, keep the current frame.
+          busyRef.current = false
+          setFrameIdx(visibleIdxRef.current)
+          return
+        }
+
+        // 3) Only now crossfade.
+        frameBackoffRef.current.delete(frame.path)
+        setFrameIdx(index)
         const start = performance.now()
         const tick = (t: number) => {
-          if (gen !== fadeGenRef.current) return
+          if (stale()) return
           // rAF timestamps can predate `start` — clamp into [0, 1]
           const k = Math.max(0, Math.min(1, (t - start) / FADE_MS))
           const target = radarOnRef.current ? opacityRef.current : 0
@@ -305,48 +386,43 @@ export function RadarMap({
             map.setPaintProperty(frontId, 'raster-opacity', 0)
             frontLayerRef.current = backId
             visibleIdxRef.current = index
+            busyRef.current = false
             containerRef.current?.setAttribute('data-visible-frame', frame.path)
           }
         }
         requestAnimationFrame(tick)
+      } catch {
+        if (stale()) return
+        frameBackoffRef.current.set(
+          frame.path,
+          nextBackoff(frameBackoffRef.current.get(frame.path), Date.now()),
+        )
+        busyRef.current = false
+        setFrameIdx(visibleIdxRef.current)
       }
-      const failed = () => {
-        frameBackoffRef.current.set(frame.path, nextBackoff(frameBackoffRef.current.get(frame.path), Date.now()))
-        if (gen === fadeGenRef.current) setFrameIdx(visibleIdxRef.current)
-      }
-
-      const center = map.getCenter()
-      const z = Math.min(Math.floor(map.getZoom()), RADAR_MAX_ZOOM)
-      const tile = tileAt(center.lat, center.lng, z)
-      const probe = new AbortController()
-      const probeTimer = window.setTimeout(() => probe.abort(), TILE_WAIT_MS)
-      fetch(radarTileUrl(frames, frame, tile.z, tile.x, tile.y), { signal: probe.signal })
-        .then((res) => {
-          window.clearTimeout(probeTimer)
-          if (res.ok) verified()
-          else failed()
-        })
-        .catch(() => {
-          window.clearTimeout(probeTimer)
-          failed()
-        })
     }
     showFrameRef.current = showFrame
 
     // paint the current frame immediately (mount / scrub / new frames)
-    showFrame(targetIdxRef.current)
+    void showFrame(targetIdxRef.current)
 
-    if (!playing || !radarOn) {
-      return () => {
-        fadeGenRef.current++ // cancel any in-flight fade
-      }
+    const stop = () => {
+      // Bumping the live refs is intentional: it cancels in-flight fades and probes.
+      fadeGenRef.current++
+      probeAbortRef.current?.abort()
+      busyRef.current = false
     }
+
+    if (!playing || !radarOn) return stop
+
+    // Advance only when the previous frame is done: playback runs at the pace
+    // the tiles arrive, instead of queueing a request burst per tick.
     const id = window.setInterval(() => {
-      showFrame((targetIdxRef.current + 1) % frames.past.length)
+      if (busyRef.current) return
+      void showFrame((targetIdxRef.current + 1) % frames.past.length)
     }, FRAME_INTERVAL_MS)
     return () => {
-      // Bumping the live ref is intentional: it cancels in-flight fades.
-      fadeGenRef.current++ // eslint-disable-line react-hooks/exhaustive-deps
+      stop()
       window.clearInterval(id)
     }
   }, [mapReady, frames, playing, radarOn])
@@ -354,7 +430,7 @@ export function RadarMap({
   const scrubTo = (index: number) => {
     setPlaying(false)
     setFrameIdx(index) // optimistic; reverts to the visible frame on failure
-    showFrameRef.current?.(index)
+    void showFrameRef.current?.(index)
   }
 
   const currentFrame = frames?.past[frameIdx]

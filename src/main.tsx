@@ -14,6 +14,9 @@ const cache = new JsonCache()
 cache.prune(FORECAST_KEY_PREFIX, 2 * 86_400_000)
 cache.prune(BATCH_KEY_PREFIX, 2 * 86_400_000)
 
+// Radar tiles used to be cached by the service worker; that cache is dead weight now.
+void globalThis.caches?.delete('rainviewer-tiles-v2')
+
 const root = document.getElementById('root')
 if (root === null) throw new Error('Missing #root element')
 

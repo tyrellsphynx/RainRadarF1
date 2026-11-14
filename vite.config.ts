@@ -58,18 +58,11 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,mjs,css,html,svg,png,woff2}'],
         runtimeCaching: [
-          {
-            // Radar tiles are immutable per frame path. Only clean 200s are
-            // cacheable: opaque/broken responses would poison the cache and
-            // keep failing the CORS check for hours.
-            urlPattern: /^https:\/\/tilecache\.rainviewer\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'rainviewer-tiles-v2',
-              expiration: { maxEntries: 800, maxAgeSeconds: 60 * 60 * 6 },
-              cacheableResponse: { statuses: [200] },
-            },
-          },
+          // Radar tiles are deliberately NOT cached here: they load through the
+          // client-side request budget (src/data/rainviewer/tileScheduler.ts —
+          // RainViewer allows ~100 requests/IP/minute) and repeat visits are
+          // served by the browser's HTTP cache. A CacheFirst rule in the worker
+          // only added opaque `no-response` errors whenever a tile failed.
           {
             // Basemap tiles.
             urlPattern: /^https:\/\/(tiles\.openfreemap\.org|basemaps\.cartocdn\.com)\/.*/i,
