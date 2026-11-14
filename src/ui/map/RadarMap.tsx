@@ -43,6 +43,9 @@ const FRAME_INTERVAL_MS = 700
 const RADAR_OPACITY = 0.85
 /** How long to wait for a frame's tiles before giving up and keeping the previous frame. */
 const TILE_WAIT_MS = 8000
+/** Failed-frame retry backoff: base delay and cap. */
+const BACKOFF_BASE_MS = 15_000
+const BACKOFF_MAX_MS = 120_000
 
 function pinsToGeoJSON(pins: PinSpec[]): FeatureCollection<Point> {
   return {
@@ -75,7 +78,12 @@ export function RadarMap({
   const frontLayerRef = useRef<'radar-a' | 'radar-b'>('radar-a')
   /** Bumped per requested frame (and per effect cleanup) to cancel stale fades. */
   const fadeGenRef = useRef(0)
-  const frameIdxRef = useRef(0)
+  /** Playback position (what we try to show next). */
+  const targetIdxRef = useRef(0)
+  /** Last frame actually rendered — the truth the UI reverts to. */
+  const visibleIdxRef = useRef(0)
+  /** Per-frame retry backoff after failed tile fetches. */
+  const frameBackoffRef = useRef(new Map<string, { fails: number; retryAt: number }>())
   const pinClickRef = useRef(onPinClick)
   const showFrameRef = useRef<((index: number) => void) | null>(null)
 
@@ -215,12 +223,9 @@ export function RadarMap({
         .then((f) => {
           if (!alive || f.past.length === 0) return
           // First load starts at the newest frame; refreshes keep their place.
-          const idx = first
-            ? f.past.length - 1
-            : Math.min(frameIdxRef.current, f.past.length - 1)
-          frameIdxRef.current = idx
+          const idx = first ? f.past.length - 1 : Math.min(targetIdxRef.current, f.past.length - 1)
+          targetIdxRef.current = idx
           setFrames(f)
-          setFrameIdx(idx)
         })
         .catch(() => {
           if (first) setFrames(null)
@@ -271,28 +276,36 @@ export function RadarMap({
       const frame = frames.past[Math.min(index, frames.past.length - 1)]
       if (!frame) return
       // Monotonic generation: only the latest requested frame may touch the
-      // layers; superseded fades and tile waits abort silently.
+      // layers; superseded fades and probes abort silently.
       const gen = ++fadeGenRef.current
+      targetIdxRef.current = index
       containerRef.current?.setAttribute('data-requested-frame', frame.path)
+
+      // Failed frames back off (dead path, throttled host, flaky network):
+      // skip them entirely — no probe, no tile burst — until their retry time.
+      const backoff = frameBackoffRef.current.get(frame.path)
+      if (backoff && Date.now() < backoff.retryAt) {
+        if (gen === fadeGenRef.current) setFrameIdx(visibleIdxRef.current)
+        return
+      }
+
       const frontId = frontLayerRef.current
       const backId = frontId === 'radar-a' ? 'radar-b' : 'radar-a'
       const backSource = map.getSource(backId) as maplibregl.RasterTileSource | undefined
       if (!backSource) return
 
-      // Snap to "current frame visible, incoming hidden": whatever happened
-      // before, the user keeps seeing the last frame that actually rendered.
-      map.setPaintProperty(frontId, 'raster-opacity', radarOn ? opacity : 0)
-      map.setPaintProperty(backId, 'raster-opacity', 0)
-      backSource.setTiles([radarTileTemplate(frames, frame)])
-
-      // Never fade to an unverified layer — that reveals a blank map (the
+      // Never swap to an unverified layer — that reveals a blank map (the
       // "radar disappears" bug). Probe one tile of the new frame first; only
-      // fade once tiles demonstrably fetch. If they don't (dead path,
-      // throttled CDN, flaky network), keep showing the previous frame.
-      let faded = false
-      const startFade = () => {
-        if (faded || gen !== fadeGenRef.current) return
-        faded = true
+      // swap once tiles demonstrably fetch. On failure the map keeps showing
+      // the last good frame and the frame is retried later with backoff.
+      const verified = () => {
+        if (gen !== fadeGenRef.current) return
+        frameBackoffRef.current.delete(frame.path)
+        setFrameIdx(index)
+        // Snap to "current frame visible, incoming hidden", then crossfade.
+        map.setPaintProperty(frontId, 'raster-opacity', radarOn ? opacity : 0)
+        map.setPaintProperty(backId, 'raster-opacity', 0)
+        backSource.setTiles([radarTileTemplate(frames, frame)])
         const start = performance.now()
         const tick = (t: number) => {
           if (gen !== fadeGenRef.current) return
@@ -306,10 +319,20 @@ export function RadarMap({
             map.setPaintProperty(backId, 'raster-opacity', radarOn ? opacity : 0)
             map.setPaintProperty(frontId, 'raster-opacity', 0)
             frontLayerRef.current = backId
+            visibleIdxRef.current = index
             containerRef.current?.setAttribute('data-visible-frame', frame.path)
           }
         }
         requestAnimationFrame(tick)
+      }
+      const failed = () => {
+        const prev = frameBackoffRef.current.get(frame.path)
+        const fails = (prev?.fails ?? 0) + 1
+        frameBackoffRef.current.set(frame.path, {
+          fails,
+          retryAt: Date.now() + Math.min(BACKOFF_BASE_MS * 2 ** (fails - 1), BACKOFF_MAX_MS),
+        })
+        if (gen === fadeGenRef.current) setFrameIdx(visibleIdxRef.current)
       }
 
       const center = map.getCenter()
@@ -320,16 +343,18 @@ export function RadarMap({
       fetch(radarTileUrl(frames, frame, tile.z, tile.x, tile.y), { signal: probe.signal })
         .then((res) => {
           window.clearTimeout(probeTimer)
-          if (res.ok) startFade()
+          if (res.ok) verified()
+          else failed()
         })
         .catch(() => {
           window.clearTimeout(probeTimer)
+          failed()
         })
     }
     showFrameRef.current = showFrame
 
     // paint the current frame immediately (mount / scrub / new frames)
-    showFrame(frameIdxRef.current)
+    showFrame(targetIdxRef.current)
 
     if (!playing || !radarOn) {
       return () => {
@@ -337,10 +362,7 @@ export function RadarMap({
       }
     }
     const id = window.setInterval(() => {
-      const next = (frameIdxRef.current + 1) % frames.past.length
-      frameIdxRef.current = next
-      setFrameIdx(next)
-      showFrame(next)
+      showFrame((targetIdxRef.current + 1) % frames.past.length)
     }, FRAME_INTERVAL_MS)
     return () => {
       // Bumping the live ref is intentional: it cancels in-flight fades.
@@ -350,9 +372,8 @@ export function RadarMap({
   }, [mapReady, frames, playing, radarOn, opacity])
 
   const scrubTo = (index: number) => {
-    frameIdxRef.current = index
-    setFrameIdx(index)
     setPlaying(false)
+    setFrameIdx(index) // optimistic; reverts to the visible frame on failure
     showFrameRef.current?.(index)
   }
 

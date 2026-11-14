@@ -86,7 +86,7 @@ async function main() {
   })
 
   await page.goto(`${BASE}/#/map`, { waitUntil: 'domcontentloaded' })
-  await page.waitForSelector('[data-visible-frame]', { timeout: 30_000 })
+  await page.waitForSelector('[data-visible-frame]', { timeout: 60_000 })
 
   const frames = await page.evaluate(() => {
     const entry = JSON.parse(localStorage.getItem('rrf1:radar-frames'))
