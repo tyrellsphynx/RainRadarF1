@@ -50,43 +50,17 @@ const FADE_MS = 240
 const FRAME_INTERVAL_MS = 700
 const RADAR_OPACITY = 0.85
 /**
- * How long one frame's probe tile may take before the frame counts as failed
- * (the pre-regression behaviour). Also bounds the worst-case busy time.
+ * How long one frame's probe tile may take before the frame counts as failed.
+ * The probe is the frame's verification (it also pre-warms the centre tile),
+ * and it bounds the worst-case busy time.
  */
 const PROBE_WAIT_MS = 8_000
 /**
- * How long a frame may take to load its viewport tiles before we keep the
- * previous one. Short on purpose: playback must never block on a slow queue,
- * and a moving viewport cancels this wait anyway.
- */
-const TILE_LOAD_WAIT_MS = 8_000
-/**
- * Watchdog for the playback gate. All waits above are bounded, so `busy` that
+ * Watchdog for the playback gate. All waits are bounded, so `busy` that
  * outlives their sum means something is wedged — restart the loop instead of
  * freezing the radar forever.
  */
-const BUSY_WATCHDOG_MS = PROBE_WAIT_MS + TILE_LOAD_WAIT_MS + FADE_MS + 2_000
-
-/** Resolves true once all tiles of the source's current view have settled; false on timeout, viewport change or cancel. */
-function waitForSourceIdle(
-  map: maplibregl.Map,
-  id: string,
-  timeoutMs: number,
-  cancelled: () => boolean,
-  viewportMoved: () => boolean,
-): Promise<boolean> {
-  return new Promise((resolve) => {
-    const deadline = Date.now() + timeoutMs
-    const poll = () => {
-      if (cancelled() || viewportMoved()) return resolve(false)
-      if (map.isSourceLoaded(id)) return resolve(true)
-      if (Date.now() >= deadline) return resolve(false)
-      window.setTimeout(poll, 100)
-    }
-    // give MapLibre a moment to notice the new tile URLs and start loading
-    window.setTimeout(poll, 150)
-  })
-}
+const BUSY_WATCHDOG_MS = PROBE_WAIT_MS + FADE_MS + 2_000
 
 function pinsToGeoJSON(pins: PinSpec[]): FeatureCollection<Point> {
   return {
@@ -421,33 +395,17 @@ export function RadarMap({
         })
         if (stale()) return
 
-        // 2) Load the whole viewport into the hidden layer. Tile requests
-        // queue behind the shared rate budget, so this can take a while.
+        // 2) Swap right away. The probe verified the frame is alive (and
+        // pre-warmed its centre tile), so the remaining tiles can stream in
+        // behind the crossfade instead of blocking playback on a full
+        // viewport load — the swap is the same speed at every zoom level.
         map.setLayoutProperty(backId, 'visibility', 'visible')
         map.setPaintProperty(frontId, 'raster-opacity', radarOnRef.current ? opacityRef.current : 0)
         map.setPaintProperty(backId, 'raster-opacity', 0)
         tileErrorsRef.current[backId] = 0
         backSource.setTiles([radarTileTemplate(frames, frame, backId)])
-        // The wait is bounded and dies with the viewport: zooming or panning
-        // underneath it must never freeze playback (the "radar stops on zoom"
-        // bug).
-        const loadZoom = map.getZoom()
-        const loadCenter = map.getCenter()
-        const viewportMoved = () =>
-          Math.abs(map.getZoom() - loadZoom) > 1e-6 ||
-          Math.abs(map.getCenter().lng - loadCenter.lng) > 1e-6 ||
-          Math.abs(map.getCenter().lat - loadCenter.lat) > 1e-6
-        const loaded = await waitForSourceIdle(map, backId, TILE_LOAD_WAIT_MS, stale, viewportMoved)
-        if (stale()) return
-        if ((tileErrorsRef.current[backId] ?? 0) > 0) throw new Error('radar tiles failed to load')
-        if (!loaded) {
-          // Still queued behind the budget (or the viewport moved): not a
-          // failure, keep the current frame.
-          setFrameIdx(visibleIdxRef.current)
-          return
-        }
 
-        // 3) Only now crossfade.
+        // 3) Crossfade.
         frameBackoffRef.current.delete(frame.path)
         setFrameIdx(index)
         const start = performance.now()

@@ -31,12 +31,61 @@ export interface TileSchedulerOptions {
   /** Where the sliding window lives (shared across tabs when localStorage). */
   store?: KeyValueStore
   storeKey?: string
+  /** Persistent tile cache; hits skip the budget and the network. */
+  blobCache?: TileBlobCache | null
 }
 
 export interface TileFetchOptions {
   signal?: AbortSignal
   /** Jump the queue (e.g. the rain-alert probe). */
   priority?: boolean
+}
+
+/**
+ * Persistent tile cache (CacheStorage). Hits bypass the request budget
+ * entirely: only real network requests count against RainViewer's rate limit,
+ * so repeat loops and revisited zoom levels cost nothing.
+ */
+export interface TileBlobCache {
+  match(url: string): Promise<ArrayBuffer | undefined>
+  put(url: string, data: ArrayBuffer): Promise<void>
+}
+
+/**
+ * CacheStorage-backed tile cache. Only clean 200s ever reach `put`, so a
+ * throttled RainViewer's opaque failures can't poison it (one poisoned entry
+ * keeps failing the WebGL CORS check for hours). Best-effort throughout.
+ */
+export function cacheStorageTileCache(cacheName: string, maxEntries = 1_200): TileBlobCache | null {
+  if (typeof caches === 'undefined') return null
+  let puts = 0
+  const open = () => caches.open(cacheName)
+  return {
+    async match(url) {
+      try {
+        const res = await (await open()).match(url)
+        return res === undefined ? undefined : await res.arrayBuffer()
+      } catch {
+        return undefined
+      }
+    },
+    async put(url, data) {
+      try {
+        const cache = await open()
+        await cache.put(url, new Response(data, { headers: { 'Content-Type': 'image/png' } }))
+        // Entries are ephemeral (radar frame paths die within hours); trim the
+        // oldest occasionally so long-lived installs don't grow unbounded.
+        if (++puts % 128 === 0) {
+          const keys = await cache.keys()
+          for (const key of keys.slice(0, Math.max(0, keys.length - maxEntries))) {
+            await cache.delete(key)
+          }
+        }
+      } catch {
+        // caching is best-effort
+      }
+    },
+  }
 }
 
 interface Job {
@@ -84,6 +133,7 @@ export class TileScheduler {
   private readonly fetchFn: typeof fetch
   private readonly store: KeyValueStore
   private readonly storeKey: string
+  private readonly blobCache: TileBlobCache | null
 
   private readonly queue: Job[] = []
   private readonly jobs = new Map<string, Job>()
@@ -108,18 +158,31 @@ export class TileScheduler {
     this.fetchFn = opts.fetchFn ?? ((input, init) => fetch(input, init))
     this.store = opts.store ?? memoryStore()
     this.storeKey = opts.storeKey ?? 'rrf1:tile-budget'
+    this.blobCache = opts.blobCache ?? null
   }
 
-  /** Fetch one tile through the budget. Rejects with an AbortError when `signal` fires. */
-  fetch(url: string, opts: TileFetchOptions = {}): Promise<ArrayBuffer> {
+  /**
+   * Fetch one tile through the budget. Rejects with an AbortError when
+   * `signal` fires. Persistent-cache hits skip the budget and the network.
+   */
+  async fetch(url: string, opts: TileFetchOptions = {}): Promise<ArrayBuffer> {
     const { signal, priority = false } = opts
-    if (signal?.aborted) return Promise.reject(abortError())
+    if (signal?.aborted) throw abortError()
 
     const hit = this.cache.get(url)
     if (hit) {
       this.cache.delete(url) // refresh LRU position
       this.cache.set(url, hit)
-      return Promise.resolve(hit.slice(0))
+      return hit.slice(0)
+    }
+
+    if (this.blobCache !== null) {
+      const blob = await this.blobCache.match(url)
+      if (signal?.aborted) throw abortError()
+      if (blob !== undefined) {
+        this.remember(url, blob)
+        return blob.slice(0)
+      }
     }
 
     let job = this.jobs.get(url)
@@ -277,6 +340,8 @@ export class TileScheduler {
       const data = await res.arrayBuffer()
       this.consecutiveFailures = 0
       this.remember(job.url, data)
+      // Only clean responses reach this point, so only clean ones are cached.
+      if (this.blobCache !== null) void this.blobCache.put(job.url, data)
       job.resolve(data)
     } catch (err) {
       if (err instanceof RateLimitedError) {

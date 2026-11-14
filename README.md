@@ -79,9 +79,11 @@ forecast horizon → **Too early to call**.
 - RainViewer limits tile requests to ~100 per IP per minute (over the limit it answers 429 without
   CORS headers, which browsers show as `net::ERR_FAILED`). Every radar tile therefore goes through a
   client-side budget (`src/data/rainviewer/tileScheduler.ts`: 80 requests/min, shared across reloads
-  and tabs, bounded concurrency, cool-down after failure streaks), uses 512 px tiles (about a quarter
-  of the requests) and playback advances only once a frame has fully loaded. The track page
-  animates right away; the world map starts paused and loads frames gradually when you press ▶.
+  and tabs, bounded concurrency, cool-down after failure streaks) and uses 512 px tiles (about a
+  quarter of the requests). A frame is swapped in once one of its tiles verifies (which also
+  pre-warms it) — the rest streams in behind the crossfade — and fetched tiles are kept in a
+  persistent cache, so repeat loops and revisited zoom levels skip the budget entirely. The track
+  page animates right away; the world map starts paused and loads frames gradually when you press ▶.
 - RainViewer's free tiles top out at zoom 7 (≈1 km/px) — radar is soft right over a circuit. The
   forecast cards are the verdict; the radar is supporting evidence. (v2: DWD 1-km tiles for EU races.)
 - RainViewer no longer provides nowcast frames (discontinued 2026-01); the "next hour" story comes

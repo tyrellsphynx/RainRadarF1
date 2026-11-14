@@ -29,6 +29,47 @@ describe('TileScheduler', () => {
     expect(fetchFn).toHaveBeenCalledTimes(1)
   })
 
+  it('serves repeat requests from the persistent cache without touching the network or the budget', async () => {
+    const store = memoryStore()
+    const mem = new Map<string, ArrayBuffer>()
+    const blobCache = {
+      match: async (url: string) => mem.get(url)?.slice(0),
+      put: async (url: string, data: ArrayBuffer) => void mem.set(url, data),
+    }
+    const fetchFn = okFetch()
+    const one = new TileScheduler({ fetchFn, store, blobCache, maxPerWindow: 1, windowMs: 60_000 })
+    const first = one.fetch('a')
+    await flush()
+    await first
+
+    // A fresh instance (reloaded page) with an already-spent budget: the
+    // persistent hit must skip both the queue and the network.
+    const two = new TileScheduler({ fetchFn, store, blobCache, maxPerWindow: 1, windowMs: 60_000 })
+    const data = await two.fetch('a')
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    expect(new Uint8Array(data)[0]).toBe(1)
+  })
+
+  it('never stores failed or throttled responses in the persistent cache', async () => {
+    const mem = new Map<string, ArrayBuffer>()
+    const blobCache = {
+      match: async (url: string) => mem.get(url)?.slice(0),
+      put: async (url: string, data: ArrayBuffer) => void mem.set(url, data),
+    }
+    const throttled = new TileScheduler({
+      fetchFn: vi.fn(async () => new Response('', { status: 429, headers: { 'retry-after': '30' } })),
+      blobCache,
+    })
+    await expect(throttled.fetch('throttled')).rejects.toBeInstanceOf(Error)
+    const broken = new TileScheduler({
+      fetchFn: vi.fn(async () => new Response('nope', { status: 404 })),
+      blobCache,
+    })
+    await expect(broken.fetch('dead')).rejects.toBeInstanceOf(Error)
+    await flush()
+    expect(mem.size).toBe(0)
+  })
+
   it('hands out copies, so callers cannot corrupt the cache', async () => {
     const s = new TileScheduler({ fetchFn: okFetch() })
     const p = s.fetch('a')
