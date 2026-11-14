@@ -14,7 +14,7 @@ import { radarTiles } from '../../data/rainviewer/tiles'
 import { outlineFor } from '../../data/circuits'
 import { formatInTz, userTz } from '../../domain/time'
 import { isBackedOff, nextBackoff, type FrameBackoff } from './frameBackoff'
-import { ensureRadarProtocol } from './radarProtocol'
+import { ensureRadarProtocol, setFrontRadarLayer } from './radarProtocol'
 import { useRadarFrames } from './useRadarFrames'
 
 export interface PinSpec {
@@ -346,7 +346,7 @@ export function RadarMap({
       for (const id of ['radar-a', 'radar-b'] as const) {
         map.addSource(id, {
           type: 'raster',
-          tiles: [first ? radarTileTemplate(frames, first) : ''],
+          tiles: [first ? radarTileTemplate(frames, first, id) : ''],
           tileSize: RADAR_TILE_SIZE,
           maxzoom: RADAR_MAX_ZOOM,
         })
@@ -366,6 +366,8 @@ export function RadarMap({
           beforeId,
         )
       }
+      // The visible layer's tiles outrank the preload tiles from now on.
+      setFrontRadarLayer(frontLayerRef.current)
     }
 
     const showFrame = async (index: number) => {
@@ -425,7 +427,7 @@ export function RadarMap({
         map.setPaintProperty(frontId, 'raster-opacity', radarOnRef.current ? opacityRef.current : 0)
         map.setPaintProperty(backId, 'raster-opacity', 0)
         tileErrorsRef.current[backId] = 0
-        backSource.setTiles([radarTileTemplate(frames, frame)])
+        backSource.setTiles([radarTileTemplate(frames, frame, backId)])
         // The wait is bounded and dies with the viewport: zooming or panning
         // underneath it must never freeze playback (the "radar stops on zoom"
         // bug).
@@ -463,6 +465,8 @@ export function RadarMap({
             map.setPaintProperty(backId, 'raster-opacity', radarOnRef.current ? opacityRef.current : 0)
             map.setPaintProperty(frontId, 'raster-opacity', 0)
             frontLayerRef.current = backId
+            // The visible layer's tiles outrank the preload tiles from now on.
+            setFrontRadarLayer(backId)
             // The old front is now the idle double-buffer: park it hidden so
             // it stops costing tile requests until the next frame switch.
             map.setLayoutProperty(frontId, 'visibility', 'none')

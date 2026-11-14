@@ -58,6 +58,14 @@ function abortError(): Error {
   return new DOMException('Tile request aborted', 'AbortError')
 }
 
+/**
+ * How often the shared sliding window is persisted at most. Sharing with
+ * other tabs and future reloads is a courtesy — approximate is fine — while
+ * synchronous localStorage writes on every request are not: a write that
+ * throws mid-scheduling dequeues jobs that then never run.
+ */
+const PERSIST_INTERVAL_MS = 1_000
+
 /** Retry-After header in ms, when the (CORS-exposed) response carries one. */
 function retryAfterMs(res: Response, fallbackMs: number): number {
   const seconds = Number(res.headers.get('retry-after'))
@@ -84,6 +92,9 @@ export class TileScheduler {
   private pausedUntil = 0
   private consecutiveFailures = 0
   private pumpTimer: ReturnType<typeof setTimeout> | null = null
+  /** Own starts not yet persisted (persistence is throttled and best-effort). */
+  private unpersisted: number[] = []
+  private persistTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(opts: TileSchedulerOptions = {}) {
     this.maxPerWindow = opts.maxPerWindow ?? 80
@@ -193,8 +204,52 @@ export class TileScheduler {
       }
 
       this.queue.shift()
-      this.store.setItem(this.storeKey, JSON.stringify([...starts, now]))
+      this.recordStart(now)
       void this.run(next)
+    }
+  }
+
+  /** Note a started request: in memory immediately, persisted at most ~1×/s. */
+  private recordStart(now: number): void {
+    this.unpersisted = this.unpersisted.filter((t) => t > now - this.windowMs)
+    this.unpersisted.push(now)
+    if (this.persistTimer === null) this.schedulePersist()
+  }
+
+  private schedulePersist(): void {
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null
+      this.persistWindow()
+    }, PERSIST_INTERVAL_MS)
+  }
+
+  /**
+   * Merge the unpersisted starts into the shared window. Best-effort: a throw
+   * here (quota, storage unavailable) must never break scheduling — that wedge
+   * dequeued jobs that then never ran, hanging every tile request behind them.
+   */
+  private persistWindow(): void {
+    if (this.unpersisted.length === 0) return
+    try {
+      const now = Date.now()
+      const merged = [...this.recentFromStore(now), ...this.unpersisted].sort((a, b) => a - b)
+      this.store.setItem(this.storeKey, JSON.stringify(merged))
+      this.unpersisted = []
+    } catch {
+      // keep the starts in memory; they still count and are retried later
+    }
+    if (this.unpersisted.length > 0 && this.persistTimer === null) this.schedulePersist()
+  }
+
+  /** The persisted part of the window: other tabs and earlier page loads. */
+  private recentFromStore(now: number): number[] {
+    try {
+      const raw = this.store.getItem(this.storeKey)
+      const parsed: unknown = raw === null ? [] : JSON.parse(raw)
+      if (!Array.isArray(parsed)) return []
+      return parsed.filter((t): t is number => typeof t === 'number' && t > now - this.windowMs && t <= now)
+    } catch {
+      return []
     }
   }
 
@@ -202,17 +257,12 @@ export class TileScheduler {
     this.pumpTimer = setTimeout(() => this.pump(), Math.max(1, ms))
   }
 
+  /** Starts inside the window: our own (in memory) plus the persisted ones (other tabs, reloads). */
   private recentStarts(now: number): number[] {
-    try {
-      const raw = this.store.getItem(this.storeKey)
-      const parsed: unknown = raw === null ? [] : JSON.parse(raw)
-      if (!Array.isArray(parsed)) return []
-      return parsed
-        .filter((t): t is number => typeof t === 'number' && t > now - this.windowMs && t <= now)
-        .sort((a, b) => a - b)
-    } catch {
-      return []
-    }
+    return [
+      ...this.recentFromStore(now),
+      ...this.unpersisted.filter((t) => t > now - this.windowMs && t <= now),
+    ].sort((a, b) => a - b)
   }
 
   private async run(job: Job): Promise<void> {

@@ -66,17 +66,54 @@ describe('TileScheduler', () => {
     const store = memoryStore()
     const a = okFetch()
     const b = okFetch()
-    const one = new TileScheduler({ fetchFn: a, store, maxPerWindow: 2, windowMs: 1000 })
-    const two = new TileScheduler({ fetchFn: b, store, maxPerWindow: 2, windowMs: 1000 })
+    const one = new TileScheduler({ fetchFn: a, store, maxPerWindow: 2, windowMs: 60_000 })
+    const two = new TileScheduler({ fetchFn: b, store, maxPerWindow: 2, windowMs: 60_000 })
     void one.fetch('x1')
     void one.fetch('x2')
     await flush()
+    await vi.advanceTimersByTimeAsync(1_100) // persistence is throttled to ~1×/s
     void two.fetch('y1')
     await flush()
     expect(a).toHaveBeenCalledTimes(2)
     expect(b).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(1100)
+    await vi.advanceTimersByTimeAsync(61_000)
     expect(b).toHaveBeenCalledTimes(1)
+  })
+
+  it('persists the window at most about once a second instead of per request', async () => {
+    const store = memoryStore()
+    const setItem = store.setItem.bind(store)
+    let writes = 0
+    store.setItem = (key, value) => {
+      writes++
+      setItem(key, value)
+    }
+    const s = new TileScheduler({ fetchFn: okFetch(), store, maxPerWindow: 100, maxConcurrent: 1 })
+    for (let i = 0; i < 5; i++) {
+      void s.fetch(`t${i}`)
+      await flush()
+    }
+    expect(writes).toBe(0) // a burst does not hit the store synchronously
+    await vi.advanceTimersByTimeAsync(1_100)
+    expect(writes).toBe(1) // one merged write for the burst
+  })
+
+  it('keeps scheduling when persistence throws (the localStorage wedge)', async () => {
+    const store = memoryStore()
+    store.setItem = () => {
+      throw new DOMException('quota exceeded', 'QuotaExceededError')
+    }
+    const fetchFn = okFetch()
+    const s = new TileScheduler({ fetchFn, store, maxPerWindow: 2, windowMs: 1000, maxConcurrent: 1 })
+    void s.fetch('a')
+    void s.fetch('b')
+    void s.fetch('c')
+    await flush()
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(1_100) // persist attempt (throws) + window slide
+    // c must still run: a throwing store write may never strand a dequeued job.
+    expect(fetchFn).toHaveBeenCalledTimes(3)
   })
 
   it('limits concurrency', async () => {

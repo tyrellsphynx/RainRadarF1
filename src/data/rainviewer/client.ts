@@ -82,26 +82,36 @@ export function filterFreshFrames(frames: RadarFrame[], nowMs: number): RadarFra
 }
 
 /**
- * Custom URL scheme MapLibre loads radar tiles through, so every tile request
- * passes the rate-limit budget (see tileScheduler.ts) instead of hitting the
- * network directly.
+ * Custom URL scheme per raster layer, so MapLibre radar tiles pass the
+ * rate-limit budget (see tileScheduler.ts) instead of hitting the network
+ * directly — and the protocol handler can tell the visible layer's tiles
+ * from the animation's preload tiles.
  */
-export const RADAR_PROTOCOL = 'rvtile'
-
-/** `https://host/path` → `rvtile://host/path` */
-export function toRadarProtocolUrl(httpsUrl: string): string {
-  return httpsUrl.replace(/^https:/, `${RADAR_PROTOCOL}:`)
+export type RadarLayerId = 'radar-a' | 'radar-b'
+export const radarProtocolSchemes: Record<RadarLayerId, string> = {
+  'radar-a': 'rvtile-a',
+  'radar-b': 'rvtile-b',
 }
 
-/** `rvtile://host/path` → `https://host/path` */
+/** `https://host/path` → the layer's budgeted scheme (`rvtile-a://host/path`). */
+export function toRadarProtocolUrl(httpsUrl: string, layer: RadarLayerId): string {
+  return httpsUrl.replace(/^https:/, `${radarProtocolSchemes[layer]}:`)
+}
+
+/** `rvtile-a://host/path` → `https://host/path` (the cache key shared by both layers). */
 export function fromRadarProtocolUrl(url: string): string {
-  return url.replace(new RegExp(`^${RADAR_PROTOCOL}:`), 'https:')
+  return url.replace(/^rvtile-[ab]:/, 'https:')
 }
 
-/** MapLibre raster tile URL template (`{z}/{x}/{y}`) for one radar frame, in the budgeted scheme. */
-export function radarTileTemplate(frames: RadarFrames, frame: RadarFrame): string {
+/** MapLibre raster tile URL template (`{z}/{x}/{y}`) for one radar frame, in the layer's budgeted scheme. */
+export function radarTileTemplate(
+  frames: RadarFrames,
+  frame: RadarFrame,
+  layer: RadarLayerId,
+): string {
   return toRadarProtocolUrl(
     `${frames.host}${frame.path}/${RADAR_TILE_SIZE}/{z}/{x}/{y}/${TILE_STYLE}.png`,
+    layer,
   )
 }
 
