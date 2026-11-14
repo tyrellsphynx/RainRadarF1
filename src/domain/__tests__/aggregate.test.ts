@@ -6,8 +6,6 @@ const hour = (iso: string, mm: number, probPct: number | null = null): HourlyPoi
   timeUtc: Date.parse(`${iso}Z`),
   mm,
   probPct,
-  rainMm: mm,
-  showersMm: 0,
 })
 
 describe('aggregateWindow', () => {

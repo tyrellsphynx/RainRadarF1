@@ -2,7 +2,7 @@ import { Suspense, lazy } from 'react'
 import { Attribution } from './ui/shell/Attribution'
 import { ErrorBoundary } from './ui/shell/ErrorBoundary'
 import { RainAlertBanner } from './ui/alerts/RainAlertBanner'
-import { navigate, useHashRoute } from './ui/shell/useHashRoute'
+import { useHashRoute } from './ui/shell/useHashRoute'
 
 // maplibre-gl is heavy — both map-bearing pages are lazy-loaded.
 const HomePage = lazy(() => import('./ui/home/HomePage'))
@@ -26,14 +26,12 @@ export default function App() {
           <a
             href="#/"
             className={route.name === 'home' ? 'active' : ''}
-            onClick={() => navigate('#/')}
           >
             Next race
           </a>
           <a
             href="#/map"
             className={route.name === 'map' ? 'active' : ''}
-            onClick={() => navigate('#/map')}
           >
             Map
           </a>

@@ -32,6 +32,28 @@ describe('JsonCache', () => {
   })
 })
 
+describe('JsonCache.prune', () => {
+  it('removes old and unreadable entries under the prefix only', () => {
+    const store = memoryStore()
+    let now = 0
+    const cache = new JsonCache(store, () => now)
+    cache.set('rrf1:forecast:old', 1)
+    now = 9_000
+    cache.set('rrf1:forecast:new', 2)
+    cache.set('rrf1:schedule:old-prefix-elsewhere', 3)
+    store.setItem('rrf1:forecast:junk', 'not-json{')
+    store.setItem('rrf1:strategy-lens', '1')
+
+    cache.prune('rrf1:forecast:', 5_000)
+
+    expect(cache.get('rrf1:forecast:old')).toBeNull()
+    expect(cache.get('rrf1:forecast:junk')).toBeNull()
+    expect(cache.get('rrf1:forecast:new')).not.toBeNull()
+    expect(cache.get('rrf1:schedule:old-prefix-elsewhere')).not.toBeNull()
+    expect(store.getItem('rrf1:strategy-lens')).toBe('1')
+  })
+})
+
 describe('isFresh', () => {
   it('honors the TTL boundary (fresh strictly inside)', () => {
     const entry = { value: 1, storedAt: 1000 }

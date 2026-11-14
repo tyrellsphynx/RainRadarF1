@@ -35,14 +35,19 @@ interface ForecastStore {
   error: string | null
 }
 
+/** How often a mounted page checks whether its forecast has gone stale. */
+const STALE_CHECK_MS = 60_000
+/** Minimum gap between background refresh attempts (also after failures). */
+const REFRESH_RETRY_MS = 5 * 60_000
+
 /**
  * Forecast for one coordinate pair. Stores data keyed by coordinates, so
  * switching circuits never shows the previous circuit's numbers.
  *
  * Stale-while-revalidate: a cached forecast renders immediately even past
- * its TTL, then a background fetch replaces it. Without this, a long-lived
- * PWA session froze at the first fetch forever (the module-level inflight
- * map keeps resolved promises).
+ * its TTL, then a background fetch replaces it. While the page stays open
+ * (a PWA left running on race day) it keeps refreshing: on a timer, and
+ * when the tab becomes visible again.
  */
 export function useForecast(lat: number | null, lon: number | null): ForecastState {
   const key = lat !== null && lon !== null ? keyOf(lat, lon) : null
@@ -52,18 +57,37 @@ export function useForecast(lat: number | null, lon: number | null): ForecastSta
   useEffect(() => {
     if (lat === null || lon === null || key === null) return
     let alive = true
+    let fetchedAt = 0
+    let lastAttempt = 0
+
+    const accept = (forecast: Forecast) => {
+      if (!alive) return
+      fetchedAt = forecast.fetchedAt
+      setStore({ key, forecast, error: null })
+    }
+
+    // Serve stale, refresh behind the scenes; keep stale on failure.
+    const revalidate = () => {
+      lastAttempt = Date.now()
+      load(lat, lon, true).then(accept).catch(() => {})
+    }
+
+    const refreshIfStale = () => {
+      const now = Date.now()
+      if (
+        document.visibilityState === 'visible' &&
+        fetchedAt > 0 &&
+        now - fetchedAt >= FORECAST_TTL_MS &&
+        now - lastAttempt >= REFRESH_RETRY_MS
+      ) {
+        revalidate()
+      }
+    }
+
     load(lat, lon)
-      .then((f) => {
-        if (!alive) return
-        setStore({ key, forecast: f, error: null })
-        if (Date.now() - f.fetchedAt >= FORECAST_TTL_MS) {
-          // Serve stale, refresh behind the scenes; keep stale on failure.
-          load(lat, lon, true)
-            .then((fresh) => {
-              if (alive) setStore({ key, forecast: fresh, error: null })
-            })
-            .catch(() => {})
-        }
+      .then((forecast) => {
+        accept(forecast)
+        if (alive && Date.now() - forecast.fetchedAt >= FORECAST_TTL_MS) revalidate()
       })
       .catch((err: unknown) => {
         if (!alive) return
@@ -73,8 +97,13 @@ export function useForecast(lat: number | null, lon: number | null): ForecastSta
           error: err instanceof Error ? err.message : String(err),
         })
       })
+
+    const timer = window.setInterval(refreshIfStale, STALE_CHECK_MS)
+    document.addEventListener('visibilitychange', refreshIfStale)
     return () => {
       alive = false
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', refreshIfStale)
     }
   }, [lat, lon, key, attempt])
 

@@ -112,7 +112,9 @@ export default function MapPage() {
         fitBoundsToPins
         onPinClick={(id) => {
           const [season, round] = id.split('-').map(Number)
-          if (Number.isFinite(season) && Number.isFinite(round)) navigate(trackHash(season, round))
+          if (season !== undefined && round !== undefined && Number.isFinite(season) && Number.isFinite(round)) {
+            navigate(trackHash(season, round))
+          }
         }}
       />
 

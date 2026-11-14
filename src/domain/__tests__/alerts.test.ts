@@ -11,8 +11,6 @@ const hour = (hoursFromNow: number, mm: number): HourlyPoint => ({
   timeUtc: NOW + hoursFromNow * 3_600_000,
   mm,
   probPct: null,
-  rainMm: mm,
-  showersMm: 0,
 })
 
 describe('forecastRainAlert (minutely)', () => {

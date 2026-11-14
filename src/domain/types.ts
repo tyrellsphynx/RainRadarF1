@@ -66,10 +66,6 @@ export interface HourlyPoint {
   mm: number
   /** Precipitation probability for the hour, 0-100, or null when unavailable. */
   probPct: number | null
-  /** Rain portion, mm. */
-  rainMm: number
-  /** Showers portion, mm. */
-  showersMm: number
 }
 
 export interface MinutePoint {

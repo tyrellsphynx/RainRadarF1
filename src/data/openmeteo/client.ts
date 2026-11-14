@@ -1,15 +1,23 @@
 import type { Forecast, HourlyPoint, MinutePoint } from '../../domain/types'
 import { JsonCache, isFresh } from '../cache'
+import { fetchJson } from '../http'
 import type { OpenMeteoHourly, OpenMeteoMinutely15, OpenMeteoResponse } from './types'
 
 /**
  * Forecast data source. Open-Meteo is free, keyless and CORS-open
  * (CC BY 4.0 — attribution rendered in the UI footer).
+ *
+ * Flow: fresh cache → network → stale cache (offline / rate-limited).
  */
 export const FORECAST_TTL_MS = 60 * 60 * 1000
 const API_BASE = 'https://api.open-meteo.com/v1/forecast'
 
-const HOURLY_VARS = 'precipitation,precipitation_probability,rain,showers'
+/** Cache key prefixes. The `v2` segment marks the interval-start timestamp format. */
+export const FORECAST_KEY_PREFIX = 'rrf1:forecast:'
+export const BATCH_KEY_PREFIX = 'rrf1:batch:'
+
+const HOUR_MS = 3_600_000
+const QUARTER_MS = 15 * 60_000
 
 export interface ForecastCoords {
   lat: number
@@ -32,7 +40,7 @@ export async function loadForecast(
   const fetchFn = opts.fetchFn ?? fetch
   const cache = opts.cache ?? new JsonCache()
   const nowMs = opts.nowMs ?? Date.now()
-  const key = `rrf1:forecast:${coords.lat.toFixed(3)},${coords.lon.toFixed(3)}`
+  const key = `${FORECAST_KEY_PREFIX}v2:${coords.lat.toFixed(3)},${coords.lon.toFixed(3)}`
 
   const cached = cache.get<Forecast>(key)
   if (!opts.force && cached && isFresh(cached, FORECAST_TTL_MS, nowMs)) return cached.value
@@ -40,23 +48,27 @@ export async function loadForecast(
   const params = new URLSearchParams({
     latitude: String(coords.lat),
     longitude: String(coords.lon),
-    hourly: HOURLY_VARS,
+    hourly: 'precipitation,precipitation_probability',
     minutely_15: 'precipitation',
     timezone: 'UTC',
     past_days: '2',
     forecast_days: '16',
   })
-  const res = await fetchFn(`${API_BASE}?${params}`)
-  if (!res.ok) throw new Error(`Open-Meteo responded ${res.status}`)
-  const json = (await res.json()) as OpenMeteoResponse
 
-  const forecast: Forecast = {
-    hourly: parseHourly(json.hourly),
-    minutely15: parseMinutely(json.minutely_15),
-    fetchedAt: nowMs,
+  try {
+    const json = await fetchJson<OpenMeteoResponse>(`${API_BASE}?${params}`, fetchFn, 'Open-Meteo')
+    const forecast: Forecast = {
+      hourly: parseHourly(json.hourly),
+      minutely15: parseMinutely(json.minutely_15),
+      fetchedAt: nowMs,
+    }
+    cache.set(key, forecast)
+    return forecast
+  } catch (err) {
+    // Offline / rate-limited: last-known data beats an error page.
+    if (cached) return cached.value
+    throw err
   }
-  cache.set(key, forecast)
-  return forecast
 }
 
 /**
@@ -72,7 +84,7 @@ export async function loadHourlyBatch(
   const fetchFn = opts.fetchFn ?? fetch
   const cache = opts.cache ?? new JsonCache()
   const nowMs = opts.nowMs ?? Date.now()
-  const key = `rrf1:batch:${coordsList.map((c) => `${c.lat.toFixed(2)},${c.lon.toFixed(2)}`).join(';')}`
+  const key = `${BATCH_KEY_PREFIX}v2:${coordsList.map((c) => `${c.lat.toFixed(2)},${c.lon.toFixed(2)}`).join(';')}`
 
   const cached = cache.get<HourlyPoint[][]>(key)
   if (!opts.force && cached && isFresh(cached, FORECAST_TTL_MS, nowMs)) return cached.value
@@ -85,13 +97,21 @@ export async function loadHourlyBatch(
     past_days: '0',
     forecast_days: '2',
   })
-  const res = await fetchFn(`${API_BASE}?${params}`)
-  if (!res.ok) throw new Error(`Open-Meteo responded ${res.status}`)
-  const json = (await res.json()) as OpenMeteoResponse | OpenMeteoResponse[]
-  const list = Array.isArray(json) ? json : [json]
-  const result = list.map((entry) => parseHourly(entry.hourly))
-  cache.set(key, result)
-  return result
+
+  try {
+    const json = await fetchJson<OpenMeteoResponse | OpenMeteoResponse[]>(
+      `${API_BASE}?${params}`,
+      fetchFn,
+      'Open-Meteo',
+    )
+    const list = Array.isArray(json) ? json : [json]
+    const result = list.map((entry) => parseHourly(entry.hourly))
+    cache.set(key, result)
+    return result
+  } catch (err) {
+    if (cached) return cached.value
+    throw err
+  }
 }
 
 /** ISO time without timezone ("2026-11-08T00:00") → Unix ms; we request UTC. */
@@ -99,21 +119,23 @@ export function parseUtcIso(iso: string): number {
   return Date.parse(iso.endsWith('Z') ? iso : `${iso}Z`)
 }
 
-function parseHourly(hourly: OpenMeteoHourly | undefined): HourlyPoint[] {
+/**
+ * Open-Meteo stamps precipitation with the END of its interval; the domain
+ * works with interval STARTS, so every timestamp is shifted back one step.
+ */
+export function parseHourly(hourly: OpenMeteoHourly | undefined): HourlyPoint[] {
   if (!hourly?.time) return []
   return hourly.time.map((time, i) => ({
-    timeUtc: parseUtcIso(time),
+    timeUtc: parseUtcIso(time) - HOUR_MS,
     mm: hourly.precipitation[i] ?? 0,
     probPct: hourly.precipitation_probability?.[i] ?? null,
-    rainMm: hourly.rain?.[i] ?? 0,
-    showersMm: hourly.showers?.[i] ?? 0,
   }))
 }
 
-function parseMinutely(minutely: OpenMeteoMinutely15 | undefined): MinutePoint[] | null {
+export function parseMinutely(minutely: OpenMeteoMinutely15 | undefined): MinutePoint[] | null {
   if (!minutely?.time?.length) return null
   return minutely.time.map((time, i) => ({
-    timeUtc: parseUtcIso(time),
+    timeUtc: parseUtcIso(time) - QUARTER_MS,
     mm: minutely.precipitation[i] ?? 0,
   }))
 }

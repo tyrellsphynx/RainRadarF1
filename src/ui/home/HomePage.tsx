@@ -1,12 +1,9 @@
 import { useMemo } from 'react'
 import { featuredWeekend, upcomingWeekends } from '../../domain/featured'
-import { formatInTz, tzAt, userTz } from '../../domain/time'
+import { formatInTz, userTz } from '../../domain/time'
 import { useSchedule } from '../hooks/useSchedule'
-import { useStrategyLens } from '../hooks/useStrategyLens'
-import { useWeekendVerdicts } from '../hooks/useWeekendVerdicts'
 import { useTick } from '../hooks/useTick'
-import { SessionCard } from './SessionCard'
-import { StrategyLensToggle } from '../shell/StrategyLensToggle'
+import { WeekendForecast } from './WeekendForecast'
 import { WeekendHero } from '../shell/WeekendHero'
 import { trackHash } from '../shell/useHashRoute'
 
@@ -20,16 +17,11 @@ export default function HomePage() {
   const featured = featuredWeekend(weekends, now)
   const weekend = featured?.weekend ?? null
 
-  const { forecast, verdicts, tyres, loading: fcLoading, error: fcError, reload: fcReload } =
-    useWeekendVerdicts(weekend)
-  const [lensOn] = useStrategyLens()
-
   const upcoming = useMemo(
     () => upcomingWeekends(weekends, now).filter((w) => w !== weekend),
     [weekends, now, weekend],
   )
   const mine = userTz()
-  const trackTz = weekend ? tzAt(weekend.circuit.lat, weekend.circuit.lon) : 'UTC'
 
   if (loading) {
     return <div className="page-loader">Loading the {new Date().getUTCFullYear()} calendar…</div>
@@ -60,39 +52,7 @@ export default function HomePage() {
         totalRounds={totalRounds}
       />
 
-      <div className="section-title-row">
-        <h2 className="section-title">Session-by-session forecast</h2>
-        <StrategyLensToggle />
-      </div>
-      {fcError && (
-        <p className="muted">
-          Forecast unavailable ({fcError}).{' '}
-          <a
-            href="#"
-            onClick={(e) => {
-              e.preventDefault()
-              fcReload()
-            }}
-          >
-            Retry
-          </a>
-        </p>
-      )}
-      {fcLoading && !forecast && <p className="muted">Fetching the forecast…</p>}
-      <div className="session-list">
-        {weekend.sessions.map((session, i) => (
-          <SessionCard
-            key={session.startUtc}
-            session={session}
-            trackTz={trackTz}
-            verdict={verdicts?.[i] ?? null}
-            hourly={forecast?.hourly ?? null}
-            tyre={tyres?.[i] ?? null}
-            strategyLens={lensOn}
-            live={liveSession !== null && session.startUtc === liveSession.startUtc}
-          />
-        ))}
-      </div>
+      <WeekendForecast weekend={weekend} live={liveSession} />
 
       {upcoming.length > 0 && (
         <>

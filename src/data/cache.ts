@@ -2,6 +2,7 @@ export interface KeyValueStore {
   getItem(key: string): string | null
   setItem(key: string, value: string): void
   removeItem(key: string): void
+  keys(): string[]
 }
 
 export interface CacheEntry<T> {
@@ -16,6 +17,7 @@ export function memoryStore(): KeyValueStore {
     getItem: (key) => map.get(key) ?? null,
     setItem: (key, value) => void map.set(key, value),
     removeItem: (key) => void map.delete(key),
+    keys: () => [...map.keys()],
   }
 }
 
@@ -25,7 +27,12 @@ function defaultStore(): KeyValueStore {
     const probe = '__rrf1_probe__'
     store.setItem(probe, '1')
     store.removeItem(probe)
-    return store
+    return {
+      getItem: (key) => store.getItem(key),
+      setItem: (key, value) => store.setItem(key, value),
+      removeItem: (key) => store.removeItem(key),
+      keys: () => Array.from({ length: store.length }, (_, i) => store.key(i) ?? ''),
+    }
   } catch {
     return memoryStore()
   }
@@ -60,6 +67,24 @@ export class JsonCache {
       this.store.setItem(key, JSON.stringify({ value, storedAt: this.now() }))
     } catch {
       // Quota exceeded / storage unavailable — caching is best-effort.
+    }
+  }
+
+  /**
+   * Drop entries under `prefix` that are older than `maxAgeMs` or unreadable.
+   * Keeps localStorage from filling up with forecasts for coordinates and
+   * cache formats nobody asks for anymore.
+   */
+  prune(prefix: string, maxAgeMs: number): void {
+    try {
+      const nowMs = this.now()
+      for (const key of this.store.keys()) {
+        if (!key.startsWith(prefix)) continue
+        const entry = this.get<unknown>(key)
+        if (entry === null || nowMs - entry.storedAt > maxAgeMs) this.delete(key)
+      }
+    } catch {
+      // best-effort
     }
   }
 

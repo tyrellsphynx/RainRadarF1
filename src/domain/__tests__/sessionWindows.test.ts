@@ -114,7 +114,8 @@ describe('session lookup', () => {
 
   it('finds the next session after now', () => {
     const fp1 = weekend.sessions[0]
-    if (!fp1) return
+    expect(fp1).toBeDefined()
+    if (!fp1 || !race) return
     expect(nextSessionAfter(weekend, fp1.startUtc - 1)?.kind).toBe('FP1')
     expect(nextSessionAfter(weekend, race.endUtc)).toBeNull()
   })

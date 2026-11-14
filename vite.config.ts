@@ -82,7 +82,7 @@ export default defineConfig({
           },
           {
             // Radar frame lists go stale fast (tile paths are ephemeral):
-            // cap their cache age well below the generic API rule below.
+            // keep their cache age short.
             urlPattern: /^https:\/\/api\.rainviewer\.com\/.*/i,
             handler: 'NetworkFirst',
             options: {
@@ -92,18 +92,10 @@ export default defineConfig({
               cacheableResponse: { statuses: [0, 200] },
             },
           },
-          {
-            // JSON APIs: network-first with a short timeout, then localStorage
-            // caching at the data layer as the deeper fallback.
-            urlPattern: /^https:\/\/(api\.jolpi\.ca|api\.open-meteo\.com)\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'weather-apis',
-              networkTimeoutSeconds: 5,
-              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
+          // Jolpica and Open-Meteo are deliberately NOT cached here: the data
+          // layer owns their caching (TTL + stale fallback in localStorage).
+          // A second, differently-timed cache in the service worker could
+          // hand back day-old responses that the app would stamp as fresh.
         ],
       },
     }),

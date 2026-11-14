@@ -1,12 +1,8 @@
 import { activeSession, isWeekendDone, isWeekendStarted, nextSessionAfter } from '../../domain/sessionWindows'
 import type { FeaturedState } from '../../domain/featured'
-import { tzAt } from '../../domain/time'
 import { useSchedule } from '../hooks/useSchedule'
-import { useStrategyLens } from '../hooks/useStrategyLens'
 import { useTick } from '../hooks/useTick'
-import { useWeekendVerdicts } from '../hooks/useWeekendVerdicts'
-import { SessionCard } from '../home/SessionCard'
-import { StrategyLensToggle } from '../shell/StrategyLensToggle'
+import { WeekendForecast } from '../home/WeekendForecast'
 import { WeekendHero } from '../shell/WeekendHero'
 import { RadarMap } from '../map/RadarMap'
 
@@ -17,17 +13,10 @@ interface TrackPageProps {
 
 /** Full dashboard for one race weekend: sessions + verdicts + radar. */
 export default function TrackPage({ season, round }: TrackPageProps) {
-  const { weekends, loading, error } = useSchedule()
+  const { weekends, loading, error, reload } = useSchedule()
   const now = useTick(30_000)
 
-  const weekend =
-    weekends.find((w) => w.season === season && w.round === round) ??
-    weekends.find((w) => w.round === round) ??
-    null
-
-  const { forecast, verdicts, tyres, loading: fcLoading, error: fcError, reload: fcReload } =
-    useWeekendVerdicts(weekend)
-  const [lensOn] = useStrategyLens()
+  const weekend = weekends.find((w) => w.season === season && w.round === round) ?? null
 
   if (loading) return <div className="page-loader">Loading the calendar…</div>
 
@@ -35,6 +24,9 @@ export default function TrackPage({ season, round }: TrackPageProps) {
     return (
       <div className="error-box">
         <p>Could not load the F1 calendar: {error}</p>
+        <button className="btn" onClick={reload}>
+          Try again
+        </button>
       </div>
     )
   }
@@ -58,7 +50,6 @@ export default function TrackPage({ season, round }: TrackPageProps) {
         ? 'weekend'
         : 'next'
   const session = live ?? nextSessionAfter(weekend, now)
-  const trackTz = tzAt(weekend.circuit.lat, weekend.circuit.lon)
   const totalRounds = weekends.filter((w) => w.season === weekend.season).length
 
   return (
@@ -71,39 +62,7 @@ export default function TrackPage({ season, round }: TrackPageProps) {
         showTrackLink={false}
       />
 
-      <div className="section-title-row">
-        <h2 className="section-title">Session-by-session forecast</h2>
-        <StrategyLensToggle />
-      </div>
-      {fcError && (
-        <p className="muted">
-          Forecast unavailable ({fcError}).{' '}
-          <a
-            href="#"
-            onClick={(e) => {
-              e.preventDefault()
-              fcReload()
-            }}
-          >
-            Retry
-          </a>
-        </p>
-      )}
-      {fcLoading && !forecast && <p className="muted">Fetching the forecast…</p>}
-      <div className="session-list">
-        {weekend.sessions.map((s, i) => (
-          <SessionCard
-            key={s.startUtc}
-            session={s}
-            trackTz={trackTz}
-            verdict={verdicts?.[i] ?? null}
-            hourly={forecast?.hourly ?? null}
-            tyre={tyres?.[i] ?? null}
-            strategyLens={lensOn}
-            live={live !== null && s.startUtc === live.startUtc}
-          />
-        ))}
-      </div>
+      <WeekendForecast weekend={weekend} live={live} />
 
       <h2 className="section-title">Rain radar — past 2 hours</h2>
       <RadarMap

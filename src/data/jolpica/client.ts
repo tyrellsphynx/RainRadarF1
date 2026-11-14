@@ -1,6 +1,7 @@
 import type { RaceWeekend } from '../../domain/types'
 import { rawRaceToWeekend } from '../../domain/sessionWindows'
 import { JsonCache, isFresh } from '../cache'
+import { fetchJson } from '../http'
 import type { JolpicaRace, JolpicaSeasonResponse, ScheduleSnapshot } from './types'
 import snapshot2026 from './snapshot-2026.json'
 
@@ -55,14 +56,25 @@ export async function loadSeason(
 /**
  * Load the seasons relevant to "now": the current year, and — once the
  * current season is over — next year's calendar if Jolpica has published it.
- * Season rollover needs no code change.
+ * Season rollover needs no code change. Early in a new year, before its
+ * calendar exists, last season stays on screen instead of an error page.
  */
 export async function loadRelevantSeasons(
   nowMs: number = Date.now(),
   opts: LoadScheduleOptions = {},
 ): Promise<RaceWeekend[]> {
   const year = new Date(nowMs).getUTCFullYear()
-  const current = await loadSeason(year, opts)
+
+  let current: RaceWeekend[]
+  try {
+    current = await loadSeason(year, opts)
+  } catch (err) {
+    try {
+      return await loadSeason(year - 1, opts)
+    } catch {
+      throw err
+    }
+  }
 
   const lastRace = Math.max(...current.map((w) => w.raceStartUtc))
   if (nowMs <= lastRace + 30 * 86_400_000) return current
@@ -77,9 +89,11 @@ export async function loadRelevantSeasons(
 }
 
 async function fetchSeasonRaces(year: number, fetchFn: typeof fetch): Promise<JolpicaRace[]> {
-  const res = await fetchFn(`${API_BASE}/${year}.json?limit=100`)
-  if (!res.ok) throw new Error(`Jolpica responded ${res.status} for ${year}`)
-  const json = (await res.json()) as JolpicaSeasonResponse
+  const json = await fetchJson<JolpicaSeasonResponse>(
+    `${API_BASE}/${year}.json?limit=100`,
+    fetchFn,
+    `Jolpica (${year})`,
+  )
   const races = json.MRData?.RaceTable?.Races
   if (!Array.isArray(races) || races.length === 0) {
     throw new Error(`Jolpica returned an empty calendar for ${year}`)

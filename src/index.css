@@ -897,3 +897,13 @@ main {
     max-width: none;
   }
 }
+
+.link-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--accent, #7dd3fc);
+  text-decoration: underline;
+  cursor: pointer;
+}

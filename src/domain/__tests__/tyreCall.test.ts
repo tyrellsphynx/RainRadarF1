@@ -24,8 +24,6 @@ const hour = (index: number, mm: number, probPct: number | null = null): HourlyP
   timeUtc: T0 + index * H,
   mm,
   probPct,
-  rainMm: mm,
-  showersMm: 0,
 })
 
 const min = (index: number, mm: number): MinutePoint => ({

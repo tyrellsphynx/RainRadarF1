@@ -72,6 +72,6 @@ export function radarRainAlert(coverage: number, radiusKm: number): RainAlert | 
   return {
     kind: 'radar',
     title: `Rain on radar within ${radiusKm} km`,
-    detail: 'Radar shows precipitation approaching the circuit right now.',
+    detail: `Radar currently shows rain falling within ${radiusKm} km of the circuit.`,
   }
 }

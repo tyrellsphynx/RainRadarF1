@@ -19,8 +19,11 @@ export interface SessionTyre {
   flags: RaceFlag[]
 }
 
-/** Per-session verdicts + tyre calls for one weekend, plus the hourly series. */
-export function useWeekendVerdicts(weekend: RaceWeekend | null) {
+/**
+ * Per-session verdicts for one weekend, plus tyre calls when `withTyres`
+ * (strategy lens) is on, plus the hourly series.
+ */
+export function useWeekendVerdicts(weekend: RaceWeekend | null, withTyres = false) {
   const { forecast, loading, error, reload } = useForecast(
     weekend ? weekend.circuit.lat : null,
     weekend ? weekend.circuit.lon : null,
@@ -34,7 +37,7 @@ export function useWeekendVerdicts(weekend: RaceWeekend | null) {
   }, [forecast, weekend])
 
   const tyres = useMemo((): SessionTyre[] | null => {
-    if (!forecast || !weekend) return null
+    if (!withTyres || !forecast || !weekend) return null
     return weekend.sessions.map((s) => ({
       call: tyreCallForWindow(forecast.hourly, forecast.minutely15, s.startUtc, s.endUtc),
       timeline: tyreTimeline(forecast.hourly, forecast.minutely15, s.startUtc, s.endUtc),
@@ -49,7 +52,7 @@ export function useWeekendVerdicts(weekend: RaceWeekend | null) {
             )
           : [],
     }))
-  }, [forecast, weekend])
+  }, [forecast, weekend, withTyres])
 
   return { forecast, verdicts, tyres, loading, error, reload }
 }

@@ -1,11 +1,14 @@
 /** Wire types for the Open-Meteo forecast API. */
 
+/**
+ * Open-Meteo timestamps are the END of the interval for precipitation:
+ * `precipitation` and `precipitation_probability` describe the preceding
+ * hour, `minutely_15.precipitation` the preceding 15 minutes.
+ */
 export interface OpenMeteoHourly {
   time: string[]
   precipitation: (number | null)[]
   precipitation_probability?: (number | null)[]
-  rain?: (number | null)[]
-  showers?: (number | null)[]
 }
 
 export interface OpenMeteoMinutely15 {

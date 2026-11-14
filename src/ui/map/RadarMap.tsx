@@ -4,16 +4,15 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import type { Feature, FeatureCollection, Point } from 'geojson'
 import { DARK_STYLE, OPENFREEMAP_ATTRIBUTION } from '../../data/map/darkStyle'
 import {
-  FRAMES_TTL_MS,
-  loadRadarFrames,
   RADAR_MAX_ZOOM,
   radarTileTemplate,
   radarTileUrl,
-  type RadarFrames,
 } from '../../data/rainviewer/client'
 import { tileAt } from '../../data/rainviewer/proximity'
 import { outlineFor } from '../../data/circuits'
 import { formatInTz, userTz } from '../../domain/time'
+import { isBackedOff, nextBackoff, type FrameBackoff } from './frameBackoff'
+import { useRadarFrames } from './useRadarFrames'
 
 export interface PinSpec {
   id: string
@@ -43,11 +42,6 @@ const FRAME_INTERVAL_MS = 700
 const RADAR_OPACITY = 0.85
 /** How long to wait for a frame's tiles before giving up and keeping the previous frame. */
 const TILE_WAIT_MS = 8000
-/** Failed-frame retry backoff: base delay and cap. */
-const BACKOFF_BASE_MS = 15_000
-const BACKOFF_MAX_MS = 600_000
-/** After this many failed probes a frame is done for the session. */
-const MAX_FRAME_FAILURES = 5
 
 function pinsToGeoJSON(pins: PinSpec[]): FeatureCollection<Point> {
   return {
@@ -85,8 +79,11 @@ export function RadarMap({
   /** Last frame actually rendered — the truth the UI reverts to. */
   const visibleIdxRef = useRef(0)
   /** Per-frame retry backoff after failed tile fetches. */
-  const frameBackoffRef = useRef(new Map<string, { fails: number; retryAt: number }>())
+  const frameBackoffRef = useRef(new Map<string, FrameBackoff>())
   const pinClickRef = useRef(onPinClick)
+  /** Latest opacity / visibility, readable from long-lived callbacks without re-running playback. */
+  const opacityRef = useRef(RADAR_OPACITY)
+  const radarOnRef = useRef(true)
   const showFrameRef = useRef<((index: number) => void) | null>(null)
 
   useEffect(() => {
@@ -94,7 +91,7 @@ export function RadarMap({
   })
 
   const [mapReady, setMapReady] = useState(false)
-  const [frames, setFrames] = useState<RadarFrames | null>(null)
+  const frames = useRadarFrames(targetIdxRef)
   const [frameIdx, setFrameIdx] = useState(0)
   const [playing, setPlaying] = useState(true)
   const [radarOn, setRadarOn] = useState(true)
@@ -217,28 +214,14 @@ export function RadarMap({
     if (source && pins.length > 0) source.setData(pinsToGeoJSON(pins))
   }, [mapReady, pins])
 
-  // ---- radar frame list (refreshed while mounted: the window slides) ----
+  // ---- radar opacity / visibility: paint only, never touches playback ----
   useEffect(() => {
-    let alive = true
-    const load = (first: boolean) =>
-      loadRadarFrames()
-        .then((f) => {
-          if (!alive || f.past.length === 0) return
-          // First load starts at the newest frame; refreshes keep their place.
-          const idx = first ? f.past.length - 1 : Math.min(targetIdxRef.current, f.past.length - 1)
-          targetIdxRef.current = idx
-          setFrames(f)
-        })
-        .catch(() => {
-          if (first) setFrames(null)
-        })
-    load(true)
-    const id = window.setInterval(() => load(false), FRAMES_TTL_MS)
-    return () => {
-      alive = false
-      window.clearInterval(id)
-    }
-  }, [])
+    opacityRef.current = opacity
+    radarOnRef.current = radarOn
+    const map = mapRef.current
+    if (!map || !mapReady || map.getSource('radar-a') === undefined) return
+    map.setPaintProperty(frontLayerRef.current, 'raster-opacity', radarOn ? opacity : 0)
+  }, [mapReady, frames, opacity, radarOn])
 
   // ---- radar layers + playback (needs both map and frames) ----
   useEffect(() => {
@@ -257,7 +240,7 @@ export function RadarMap({
           type: 'raster',
           tiles: [first ? radarTileTemplate(frames, first) : ''],
           tileSize: 256,
-          maxzoom: 7,
+          maxzoom: RADAR_MAX_ZOOM,
         })
         map.addLayer(
           {
@@ -285,8 +268,7 @@ export function RadarMap({
 
       // Failed frames back off (dead path, throttled host, flaky network):
       // skip them entirely — no probe, no tile burst — until their retry time.
-      const backoff = frameBackoffRef.current.get(frame.path)
-      if (backoff && Date.now() < backoff.retryAt) {
+      if (isBackedOff(frameBackoffRef.current.get(frame.path), Date.now())) {
         if (gen === fadeGenRef.current) setFrameIdx(visibleIdxRef.current)
         return
       }
@@ -305,7 +287,7 @@ export function RadarMap({
         frameBackoffRef.current.delete(frame.path)
         setFrameIdx(index)
         // Snap to "current frame visible, incoming hidden", then crossfade.
-        map.setPaintProperty(frontId, 'raster-opacity', radarOn ? opacity : 0)
+        map.setPaintProperty(frontId, 'raster-opacity', radarOnRef.current ? opacityRef.current : 0)
         map.setPaintProperty(backId, 'raster-opacity', 0)
         backSource.setTiles([radarTileTemplate(frames, frame)])
         const start = performance.now()
@@ -313,12 +295,13 @@ export function RadarMap({
           if (gen !== fadeGenRef.current) return
           // rAF timestamps can predate `start` — clamp into [0, 1]
           const k = Math.max(0, Math.min(1, (t - start) / FADE_MS))
-          map.setPaintProperty(backId, 'raster-opacity', k * opacity)
-          map.setPaintProperty(frontId, 'raster-opacity', (1 - k) * opacity)
+          const target = radarOnRef.current ? opacityRef.current : 0
+          map.setPaintProperty(backId, 'raster-opacity', k * target)
+          map.setPaintProperty(frontId, 'raster-opacity', (1 - k) * target)
           if (k < 1) {
             requestAnimationFrame(tick)
           } else {
-            map.setPaintProperty(backId, 'raster-opacity', radarOn ? opacity : 0)
+            map.setPaintProperty(backId, 'raster-opacity', radarOnRef.current ? opacityRef.current : 0)
             map.setPaintProperty(frontId, 'raster-opacity', 0)
             frontLayerRef.current = backId
             visibleIdxRef.current = index
@@ -328,17 +311,7 @@ export function RadarMap({
         requestAnimationFrame(tick)
       }
       const failed = () => {
-        const prev = frameBackoffRef.current.get(frame.path)
-        const fails = (prev?.fails ?? 0) + 1
-        frameBackoffRef.current.set(frame.path, {
-          fails,
-          // Give up entirely after too many failures: endless retries only
-          // spam the console while neighbouring frames tell the story.
-          retryAt:
-            fails >= MAX_FRAME_FAILURES
-              ? Number.POSITIVE_INFINITY
-              : Date.now() + Math.min(BACKOFF_BASE_MS * 2 ** (fails - 1), BACKOFF_MAX_MS),
-        })
+        frameBackoffRef.current.set(frame.path, nextBackoff(frameBackoffRef.current.get(frame.path), Date.now()))
         if (gen === fadeGenRef.current) setFrameIdx(visibleIdxRef.current)
       }
 
@@ -376,7 +349,7 @@ export function RadarMap({
       fadeGenRef.current++ // eslint-disable-line react-hooks/exhaustive-deps
       window.clearInterval(id)
     }
-  }, [mapReady, frames, playing, radarOn, opacity])
+  }, [mapReady, frames, playing, radarOn])
 
   const scrubTo = (index: number) => {
     setPlaying(false)
@@ -398,6 +371,7 @@ export function RadarMap({
               className="icon-btn"
               onClick={() => setPlaying((p) => !p)}
               title={playing ? 'Pause radar' : 'Play radar'}
+              aria-label={playing ? 'Pause radar' : 'Play radar'}
             >
               {playing ? '⏸' : '▶'}
             </button>
@@ -408,6 +382,7 @@ export function RadarMap({
               value={frameIdx}
               onChange={(e) => scrubTo(Number(e.target.value))}
               aria-label="Radar frame"
+              aria-valuetext={currentFrame ? formatInTz(currentFrame.timeUtc, mine).time : undefined}
             />
             <span className="frame-time">
               {currentFrame ? formatInTz(currentFrame.timeUtc, mine).time : '—'}
