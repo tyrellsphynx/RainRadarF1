@@ -45,7 +45,9 @@ const RADAR_OPACITY = 0.85
 const TILE_WAIT_MS = 8000
 /** Failed-frame retry backoff: base delay and cap. */
 const BACKOFF_BASE_MS = 15_000
-const BACKOFF_MAX_MS = 120_000
+const BACKOFF_MAX_MS = 600_000
+/** After this many failed probes a frame is done for the session. */
+const MAX_FRAME_FAILURES = 5
 
 function pinsToGeoJSON(pins: PinSpec[]): FeatureCollection<Point> {
   return {
@@ -330,7 +332,12 @@ export function RadarMap({
         const fails = (prev?.fails ?? 0) + 1
         frameBackoffRef.current.set(frame.path, {
           fails,
-          retryAt: Date.now() + Math.min(BACKOFF_BASE_MS * 2 ** (fails - 1), BACKOFF_MAX_MS),
+          // Give up entirely after too many failures: endless retries only
+          // spam the console while neighbouring frames tell the story.
+          retryAt:
+            fails >= MAX_FRAME_FAILURES
+              ? Number.POSITIVE_INFINITY
+              : Date.now() + Math.min(BACKOFF_BASE_MS * 2 ** (fails - 1), BACKOFF_MAX_MS),
         })
         if (gen === fadeGenRef.current) setFrameIdx(visibleIdxRef.current)
       }
