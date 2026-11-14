@@ -59,13 +59,15 @@ export default defineConfig({
         globPatterns: ['**/*.{js,mjs,css,html,svg,png,woff2}'],
         runtimeCaching: [
           {
-            // Radar tiles: immutable per frame path — cache-first is safe.
+            // Radar tiles are immutable per frame path. Only clean 200s are
+            // cacheable: opaque/broken responses would poison the cache and
+            // keep failing the CORS check for hours.
             urlPattern: /^https:\/\/tilecache\.rainviewer\.com\/.*/i,
             handler: 'CacheFirst',
             options: {
-              cacheName: 'rainviewer-tiles',
+              cacheName: 'rainviewer-tiles-v2',
               expiration: { maxEntries: 800, maxAgeSeconds: 60 * 60 * 6 },
-              cacheableResponse: { statuses: [0, 200] },
+              cacheableResponse: { statuses: [200] },
             },
           },
           {
@@ -73,9 +75,9 @@ export default defineConfig({
             urlPattern: /^https:\/\/(tiles\.openfreemap\.org|basemaps\.cartocdn\.com)\/.*/i,
             handler: 'CacheFirst',
             options: {
-              cacheName: 'basemap-tiles',
+              cacheName: 'basemap-tiles-v2',
               expiration: { maxEntries: 1000, maxAgeSeconds: 60 * 60 * 24 * 7 },
-              cacheableResponse: { statuses: [0, 200] },
+              cacheableResponse: { statuses: [200] },
             },
           },
           {
@@ -84,7 +86,7 @@ export default defineConfig({
             urlPattern: /^https:\/\/api\.rainviewer\.com\/.*/i,
             handler: 'NetworkFirst',
             options: {
-              cacheName: 'rainviewer-api',
+              cacheName: 'rainviewer-api-v2',
               networkTimeoutSeconds: 10,
               expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 },
               cacheableResponse: { statuses: [0, 200] },
