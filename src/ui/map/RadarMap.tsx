@@ -406,7 +406,9 @@ export function RadarMap({
         backSource.setTiles([radarTileTemplate(frames, frame, backId)])
 
         // 3) Crossfade.
-        frameBackoffRef.current.delete(frame.path)
+        // A frame that works again means the host has recovered: give every
+        // backed-off frame another chance instead of waiting out its cap.
+        if (frameBackoffRef.current.delete(frame.path)) frameBackoffRef.current.clear()
         setFrameIdx(index)
         const start = performance.now()
         fading = true

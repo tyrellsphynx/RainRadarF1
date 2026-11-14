@@ -1,23 +1,22 @@
 /** Failed-frame retry backoff: base delay and cap. */
 export const BACKOFF_BASE_MS = 15_000
 export const BACKOFF_MAX_MS = 600_000
-/** After this many failed probes a frame is done for the session. */
-export const MAX_FRAME_FAILURES = 5
 
 export interface FrameBackoff {
   fails: number
   retryAt: number
 }
 
-/** Backoff state after one more failed probe of a frame. */
+/**
+ * Backoff state after one more failed probe of a frame. Never permanent:
+ * a frame is skipped while backed off but always comes back within the cap
+ * — and a recovered neighbour brings it back right away (see RadarMap).
+ */
 export function nextBackoff(prev: FrameBackoff | undefined, nowMs: number): FrameBackoff {
   const fails = (prev?.fails ?? 0) + 1
   return {
     fails,
-    retryAt:
-      fails >= MAX_FRAME_FAILURES
-        ? Number.POSITIVE_INFINITY
-        : nowMs + Math.min(BACKOFF_BASE_MS * 2 ** (fails - 1), BACKOFF_MAX_MS),
+    retryAt: nowMs + Math.min(BACKOFF_BASE_MS * 2 ** (fails - 1), BACKOFF_MAX_MS),
   }
 }
 

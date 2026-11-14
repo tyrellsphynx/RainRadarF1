@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   BACKOFF_BASE_MS,
   BACKOFF_MAX_MS,
-  MAX_FRAME_FAILURES,
   isBackedOff,
   nextBackoff,
   type FrameBackoff,
@@ -16,18 +15,18 @@ describe('nextBackoff', () => {
     expect(second).toEqual({ fails: 2, retryAt: 2000 + BACKOFF_BASE_MS * 2 })
   })
 
-  it('never waits longer than the cap', () => {
-    const prev: FrameBackoff = { fails: MAX_FRAME_FAILURES - 2, retryAt: 0 }
-    const next = nextBackoff(prev, 0)
-    expect(next.retryAt).toBeLessThanOrEqual(BACKOFF_MAX_MS)
+  it('never waits longer than the cap, however often it failed', () => {
+    let b: FrameBackoff | undefined
+    for (let i = 0; i < 10; i++) b = nextBackoff(b, 0)
+    expect(b?.retryAt).toBe(BACKOFF_MAX_MS)
   })
 
-  it('gives up for good after the maximum number of failures', () => {
-    const prev: FrameBackoff = { fails: MAX_FRAME_FAILURES - 1, retryAt: 0 }
-    const next = nextBackoff(prev, 5000)
-    expect(next.fails).toBe(MAX_FRAME_FAILURES)
-    expect(next.retryAt).toBe(Number.POSITIVE_INFINITY)
-    expect(isBackedOff(next, Number.MAX_SAFE_INTEGER)).toBe(true)
+  it('always comes back eventually — a frame is never dead for good', () => {
+    let b: FrameBackoff | undefined
+    for (let i = 0; i < 25; i++) b = nextBackoff(b, 5_000)
+    // The retry time is finite, so the frame is tried again one day.
+    expect(Number.isFinite(b?.retryAt)).toBe(true)
+    expect(isBackedOff(b, Number.MAX_SAFE_INTEGER)).toBe(false)
   })
 })
 
